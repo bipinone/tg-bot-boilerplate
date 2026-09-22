@@ -1,0 +1,15 @@
+[Unit]
+Description=TeleCore Telegram Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/tg-bot-boilerplate
+ExecStart=/root/tg-bot-boilerplate/venv/bin/python -m app.main
+Restart=always
+RestartSec=5
+EnvironmentFile=/root/tg-bot-boilerplate/.env
+
+[Install]
+WantedBy=multi-user.target
