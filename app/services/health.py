@@ -54,8 +54,11 @@ class HealthServer:
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, config.health.host, config.health.port)
-        await site.start()
-        logger.info("Health server running on http://%s:%s/health", config.health.host, config.health.port)
+        try:
+            await site.start()
+            logger.info("Health server running on http://%s:%s/health", config.health.host, config.health.port)
+        except OSError as e:
+            logger.warning("Could not bind Health server to port %s: %s (Bot will continue running)", config.health.port, e)
 
     async def stop(self):
         """Gracefully stops the HTTP server."""

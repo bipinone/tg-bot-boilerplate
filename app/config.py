@@ -27,7 +27,7 @@ def _parse_list_ints(value: Optional[str]) -> List[int]:
 @dataclass
 class BotConfig:
     token: str = field(default_factory=lambda: os.getenv("BOT_TOKEN", ""))
-    admins: List[int] = field(default_factory=lambda: _parse_list_ints(os.getenv("ADMIN_IDS", "")))
+    admins: List[int] = field(default_factory=lambda: _parse_list_ints(os.getenv("ADMIN_IDS") or os.getenv("BOT_ADMINS", "")))
     rate_limit: float = field(default_factory=lambda: float(os.getenv("RATE_LIMIT_SECONDS", "1.0")))
     drop_pending_updates: bool = field(default_factory=lambda: _parse_bool(os.getenv("DROP_PENDING_UPDATES", "true"), True))
 
