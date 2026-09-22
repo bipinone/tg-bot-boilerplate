@@ -12,7 +12,7 @@ class DatabaseSession:
     async def init_models(self):
         """Initializes database schema."""
         async with aiosqlite.connect(self.db_path) as db:
-            # Users table
+            # Users table with forum topic_id support
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -22,11 +22,18 @@ class DatabaseSession:
                     language_code TEXT DEFAULT 'en',
                     referrer_id INTEGER,
                     points INTEGER DEFAULT 0,
+                    topic_id INTEGER,
                     is_banned BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Auto-migrate if topic_id is missing in existing database
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN topic_id INTEGER")
+            except Exception:
+                pass
 
             # Analytics events table
             await db.execute("""
@@ -119,3 +126,25 @@ class DatabaseSession:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT COUNT(*) FROM users WHERE referrer_id = ?", (user_id,)) as cur:
                 return (await cur.fetchone())[0]
+
+    async def set_user_topic(self, user_id: int, topic_id: int) -> bool:
+        """Stores the Telegram forum topic_id associated with a user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("UPDATE users SET topic_id = ? WHERE user_id = ?", (topic_id, user_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_user_topic(self, user_id: int) -> Optional[int]:
+        """Returns the topic_id of a user if already created."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT topic_id FROM users WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row and row[0] else None
+
+    async def get_user_by_topic(self, topic_id: int) -> Optional[Dict[str, Any]]:
+        """Finds which user belongs to a specific forum topic_id."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE topic_id = ?", (topic_id,)) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None

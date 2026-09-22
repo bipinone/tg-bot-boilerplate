@@ -11,8 +11,10 @@ class TelegramLogService:
     """
     Asynchronous Telegram logging service.
     Supports:
-    - Standard Groups & Private Channels (LOG_CHAT_ID)
-    - Supergroups with Forum Topics (LOG_CHAT_ID + LOG_THREAD_ID)
+    - Standard Groups & Channels (LOG_CHAT_ID)
+    - Static Forum Topic (LOG_CHAT_ID + LOG_THREAD_ID)
+    - Dynamic Per-User Forum Topics (AUTO_CREATE_USER_TOPICS=true)
+      Automatically creates a dedicated Forum Topic for each new user!
     """
     def __init__(self, bot: Bot):
         self.bot = bot
@@ -33,7 +35,6 @@ class TelegramLogService:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True
             }
-            # Route to Forum Topic if thread_id is configured
             if target_thread:
                 kwargs["message_thread_id"] = target_thread
 
@@ -45,6 +46,39 @@ class TelegramLogService:
         except Exception as e:
             logger.error("Unexpected exception in TelegramLogService: %s", e)
             return False
+
+    async def get_or_create_user_topic(
+        self,
+        user_id: int,
+        first_name: str,
+        username: Optional[str],
+        db
+    ) -> Optional[int]:
+        """
+        Creates a dedicated forum topic for each new user in the supergroup,
+        or returns existing topic_id from database.
+        """
+        if not self.chat_id or not config.logging.create_user_topics:
+            return None
+
+        # Check existing topic in db
+        existing_topic = await db.get_user_topic(user_id)
+        if existing_topic:
+            return existing_topic
+
+        try:
+            topic_name = f"{first_name} | {user_id}"[:128]
+            topic = await self.bot.create_forum_topic(
+                chat_id=self.chat_id,
+                name=topic_name
+            )
+            thread_id = topic.message_thread_id
+            await db.set_user_topic(user_id, thread_id)
+            logger.info("Created dedicated forum topic #%s for user %s (%s)", thread_id, user_id, first_name)
+            return thread_id
+        except Exception as e:
+            logger.warning("Could not auto-create forum topic for user %s (chat may not be a forum): %s", user_id, e)
+            return None
 
     async def log_startup(self, bot_username: str, active_modules: List[str]):
         """Notifies log chat when the bot initializes."""
@@ -60,8 +94,19 @@ class TelegramLogService:
         )
         await self.send_log(text)
 
-    async def log_new_user(self, user_id: int, username: Optional[str], first_name: str, referrer_id: Optional[int] = None):
-        """Logs when a new user registers via /start."""
+    async def log_new_user(
+        self,
+        user_id: int,
+        username: Optional[str],
+        first_name: str,
+        referrer_id: Optional[int] = None,
+        db = None
+    ):
+        """Creates a dedicated topic for this user and drops initial profile info."""
+        thread_id = None
+        if db:
+            thread_id = await self.get_or_create_user_topic(user_id, first_name, username, db)
+
         user_tag = f"@{username}" if username else f"<code>{user_id}</code>"
         ref_text = f"\n• <b>Referred By:</b> <code>{referrer_id}</code>" if referrer_id else ""
 
@@ -69,9 +114,23 @@ class TelegramLogService:
             "👤 <b>New User Registered</b>\n\n"
             f"• <b>User:</b> {first_name} ({user_tag})\n"
             f"• <b>User ID:</b> <code>{user_id}</code>"
-            f"{ref_text}"
+            f"{ref_text}\n\n"
+            "<i>All future activities and messages from this user will be logged in this dedicated topic!</i>"
         )
-        await self.send_log(text)
+        await self.send_log(text, thread_id=thread_id)
+
+    async def log_user_activity(
+        self,
+        user_id: int,
+        first_name: str,
+        username: Optional[str],
+        activity_text: str,
+        db
+    ):
+        """Logs any user message or action directly to their personal topic thread."""
+        thread_id = await self.get_or_create_user_topic(user_id, first_name, username, db)
+        log_entry = f"💬 <b>Activity:</b>\n<code>{activity_text}</code>"
+        await self.send_log(log_entry, thread_id=thread_id)
 
     async def log_error(self, error_message: str, user_id: Optional[int] = None, command: Optional[str] = None):
         """Logs an unexpected exception/error to the log channel or specific error topic."""

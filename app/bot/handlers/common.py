@@ -46,9 +46,9 @@ async def start_handler(message: Message, db: DatabaseSession, tg_logger = None)
 
     await db.log_event(user.id, "start")
 
-    # Send log to group/topic if brand new user
+    # Send log to group/topic (auto-creates a dedicated user topic if enabled)
     if is_new and tg_logger:
-        await tg_logger.log_new_user(user.id, user.username, user.first_name, referrer_id)
+        await tg_logger.log_new_user(user.id, user.username, user.first_name, referrer_id, db=db)
 
     text = (
         f"👋 <b>Welcome, {user.first_name}!</b>\n\n"

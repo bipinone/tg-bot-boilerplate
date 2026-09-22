@@ -99,5 +99,24 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
             disable_web_page_preview=True
         )
 
+        # 3. Test dynamic auto-creation of per-user forum topic
+        mock_topic = MagicMock()
+        mock_topic.message_thread_id = 999
+        mock_bot.create_forum_topic = AsyncMock(return_value=mock_topic)
+
+        await self.db.upsert_user(user_id=7777, username="newuser", first_name="Alex")
+        thread_id = await logger_service.get_or_create_user_topic(7777, "Alex", "newuser", self.db)
+        self.assertEqual(thread_id, 999)
+        mock_bot.create_forum_topic.assert_called_with(
+            chat_id=-1001234567890,
+            name="Alex | 7777"
+        )
+
+        # Second call should retrieve from db without re-calling create_forum_topic
+        mock_bot.create_forum_topic.reset_mock()
+        cached_thread = await logger_service.get_or_create_user_topic(7777, "Alex", "newuser", self.db)
+        self.assertEqual(cached_thread, 999)
+        mock_bot.create_forum_topic.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,7 @@ def _parse_optional_int(value: Optional[str]) -> Optional[int]:
 class LoggingConfig:
     chat_id: Optional[int] = field(default_factory=lambda: _parse_optional_int(os.getenv("LOG_CHAT_ID", "")))
     thread_id: Optional[int] = field(default_factory=lambda: _parse_optional_int(os.getenv("LOG_THREAD_ID", "")))
+    create_user_topics: bool = field(default_factory=lambda: _parse_bool(os.getenv("AUTO_CREATE_USER_TOPICS", "true"), True))
     level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
 
 @dataclass
