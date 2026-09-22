@@ -150,7 +150,7 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
-    db = DatabaseSession(config.db.sqlite_path)
+    db = DatabaseSession.from_config(config.db)
     tg_logger = TelegramLogService(bot)
     dp = create_dispatcher(db, tg_logger)
 
@@ -165,10 +165,20 @@ async def main():
             await run_polling(bot, dp, db, tg_logger)
     finally:
         await health_server.stop()
+        await db.close()
         await bot.session.close()
 
 if __name__ == "__main__":
+    # Activate ultra-fast C-based event loop on Linux/macOS
+    try:
+        import uvloop
+        uvloop.install()
+        logger.info("⚡ Ultra-fast uvloop event loop activated")
+    except (ImportError, AttributeError):
+        pass
+
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("TeleCore bot stopped gracefully.")
+

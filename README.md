@@ -32,13 +32,15 @@ Most Telegram bot starters provide only a basic `/start` handler, forcing develo
 
 ### Key Architectural Pillars
 
-- **Async Core**: Built on Python 3.10+ and `aiogram 3.x` using native asynchronous I/O.
+- **Async Core & Blazing Speed**: Built on Python 3.10+ and `aiogram 3.x` with native `uvloop` C-based event loops, `orjson` serialization, and sub-millisecond in-memory TTL caching.
+- **Multi-Database Provider (Pluggable DAL)**: Native async driver support for **SQLite** (`aiosqlite`), **PostgreSQL** (`asyncpg`), **MySQL/MariaDB** (`aiomysql`), and **MongoDB** (`motor`). Switch engines simply by setting `DB_TYPE` or `DATABASE_URL`!
 - **Dual Runtime Modes**: Supports both local **Long Polling** and production **Webhooks** via `aiohttp`.
 - **Feature-Flagged Modules**: Enable or disable features directly via `.env` flags without editing core application code.
-- **Async Persistence Layer**: SQLite default with automatic migrations, seamlessly upgradeable to PostgreSQL.
-- **Anti-Flood Middleware**: In-memory and Redis-compatible sliding window rate limiter to prevent API 429 penalties.
+- **Anti-Flood & Global Security**: Sliding window rate limiter, ban enforcement with reasons, and maintenance mode filters.
 - **Telegram Group & Forum Topic Logging**: Real-time alerts for bot startups, new user registrations, and unhandled errors routed to standard channels or specific Supergroup Forum Topics (`message_thread_id`).
+- **In-Bot Control Panel**: Dynamic `/panel` for instant setting toggles without restarting containers.
 - **Docker Compose Stack**: Containerized deployment with optional Redis caching service.
+
 
 ---
 
@@ -126,12 +128,22 @@ BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
 ADMIN_IDS=123456789
 RATE_LIMIT_SECONDS=1.0
 
+# Choose your database backend (sqlite | postgres | mysql | mongo):
+DB_TYPE=sqlite
+SQLITE_PATH=bot_database.sqlite3
+
+# Or provide a universal connection string:
+# DATABASE_URL=postgresql://user:password@localhost:5432/telecore_bot
+# DATABASE_URL=mysql://user:password@localhost:3306/telecore_bot
+# DATABASE_URL=mongodb://localhost:27017/telecore_bot
+
 # Toggle feature modules
 ENABLE_MODULE_ADMIN=true
 ENABLE_MODULE_BROADCAST=true
 ENABLE_MODULE_REFERRALS=true
 ENABLE_MODULE_FORCE_SUB=false
 ```
+
 
 #### 3. Run Locally
 

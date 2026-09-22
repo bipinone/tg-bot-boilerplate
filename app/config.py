@@ -29,8 +29,14 @@ class BotConfig:
 
 @dataclass
 class DatabaseConfig:
-    url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.sqlite3"))
+    db_type: str = field(default_factory=lambda: os.getenv("DB_TYPE", "").lower())
+    url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
     sqlite_path: str = field(default_factory=lambda: os.getenv("SQLITE_PATH", "bot_database.sqlite3"))
+    host: str = field(default_factory=lambda: os.getenv("DB_HOST", "localhost"))
+    port: int = field(default_factory=lambda: int(os.getenv("DB_PORT", "0") or "0"))
+    user: str = field(default_factory=lambda: os.getenv("DB_USER", ""))
+    password: str = field(default_factory=lambda: os.getenv("DB_PASSWORD", ""))
+    database: str = field(default_factory=lambda: os.getenv("DB_NAME", "telecore_bot"))
 
 @dataclass
 class RedisConfig:

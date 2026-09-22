@@ -243,8 +243,84 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(staff_res, "handler_reached")
         mock_handler.assert_called_once()
 
+    def test_memory_ttl_cache(self):
+        from app.database.cache import MemoryTTLCache
+        import time
+
+        cache = MemoryTTLCache(default_ttl_seconds=0.1)
+        cache.set("key1", "val1")
+        self.assertEqual(cache.get("key1"), "val1")
+
+        # Test expiration
+        time.sleep(0.15)
+        self.assertIsNone(cache.get("key1"))
+
+        # Test deletion
+        cache.set("key2", "val2", ttl=10.0)
+        cache.delete("key2")
+        self.assertIsNone(cache.get("key2"))
+
+    async def test_database_caching_and_invalidation(self):
+        # 1. Ban caching
+        await self.db.upsert_user(user_id=8001, username="test_cache", first_name="CacheTest")
+        self.assertFalse(await self.db.is_user_banned(8001))
+        # Ensure it's in cache
+        self.assertEqual(self.db.cache.get("ban:8001"), False)
+
+        # Ban user -> should invalidate cache and return True
+        await self.db.set_ban(8001, is_banned=True, reason="Rule violation")
+        self.assertIsNone(self.db.cache.get("ban:8001"))
+        self.assertTrue(await self.db.is_user_banned(8001))
+
+        # 2. Setting caching
+        await self.db.set_setting("speed_test", "100")
+        self.assertEqual(await self.db.get_setting("speed_test"), "100")
+        self.assertEqual(self.db.cache.get("setting:speed_test"), "100")
+
+        # Updating setting invalidates cache
+        await self.db.set_setting("speed_test", "200")
+        self.assertIsNone(self.db.cache.get("setting:speed_test"))
+        self.assertEqual(await self.db.get_setting("speed_test"), "200")
+
+        # 3. Role caching
+        await self.db.set_user_role(8001, "moderator")
+        self.assertEqual(await self.db.get_user_role(8001), "moderator")
+        self.assertEqual(self.db.cache.get("role:8001"), "moderator")
+
+        await self.db.set_user_role(8001, "admin")
+        self.assertIsNone(self.db.cache.get("role:8001"))
+        self.assertEqual(await self.db.get_user_role(8001), "admin")
+
+    def test_multi_database_factory(self):
+        from app.database.factory import create_database_adapter
+        from app.database.adapters.sqlite import SQLiteAdapter
+        from app.database.adapters.postgres import PostgresAdapter
+        from app.database.adapters.mysql import MySQLAdapter
+        from app.database.adapters.mongo import MongoAdapter
+
+        # 1. SQLite
+        sqlite_ad = create_database_adapter(db_type="sqlite")
+        self.assertIsInstance(sqlite_ad, SQLiteAdapter)
+
+        # 2. Postgres
+        pg_ad = create_database_adapter(url="postgresql://user:pass@localhost:5432/testdb")
+        self.assertIsInstance(pg_ad, PostgresAdapter)
+
+        # 3. MySQL
+        mysql_ad = create_database_adapter(url="mysql://user:pass@localhost:3306/testdb")
+        self.assertIsInstance(mysql_ad, MySQLAdapter)
+
+        # 4. Mongo
+        mongo_ad = create_database_adapter(url="mongodb://localhost:27017/testdb")
+        self.assertIsInstance(mongo_ad, MongoAdapter)
+
+        # 5. Fallback auto-detection from db_type string
+        mongo_ad2 = create_database_adapter(db_type="mongo")
+        self.assertIsInstance(mongo_ad2, MongoAdapter)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
