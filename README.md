@@ -172,12 +172,28 @@ tg-bot-boilerplate/
 
 TeleCore includes an **intelligent, self-healing setup engine** that automatically detects your Operating System, auto-installs missing system tools, auto-remedies missing `python3-venv` packages, validates Python 3.10+, and configures your `.env` interactively.
 
-##### 🐧 Linux / 🍎 macOS / 🤖 Android Termux / 🪟 WSL:
+##### 🐧 Linux / 🍎 macOS / 🪟 WSL:
 ```bash
 git clone https://github.com/bipinone/tg-bot-boilerplate.git
 cd tg-bot-boilerplate
 chmod +x scripts/setup.sh
 ./scripts/setup.sh
+```
+
+##### 📱 Android Mobile (Termux):
+```bash
+# 1. Install prerequisites in Termux
+pkg update -y && pkg install -y git python
+
+# 2. Clone & run automated self-healing setup
+git clone https://github.com/bipinone/tg-bot-boilerplate.git
+cd tg-bot-boilerplate
+bash scripts/setup.sh
+
+# 3. Keep bot running 24/7 without Android killing it
+termux-wake-lock
+source venv/bin/activate
+python -m app.main
 ```
 
 ##### 🪟 Windows (PowerShell):

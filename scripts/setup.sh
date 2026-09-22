@@ -146,16 +146,22 @@ setup_virtualenv() {
         fi
     fi
 
+    TMP_DIR="${TMPDIR:-/tmp}"
+    if [ ! -d "$TMP_DIR" ]; then
+        TMP_DIR="${PREFIX:-/data/data/com.termux/files/usr}/tmp"
+        [ ! -d "$TMP_DIR" ] && TMP_DIR="."
+    fi
+
     # Attempt standard venv creation
     local VENV_SUCCESS=false
-    if $PYTHON_BIN -m venv venv 2> /tmp/telecore_venv_err.log; then
+    if $PYTHON_BIN -m venv venv 2> "$TMP_DIR/telecore_venv_err.log"; then
         VENV_SUCCESS=true
     else
         log_warn "Standard 'python -m venv' failed. Diagnosing error..."
-        cat /tmp/telecore_venv_err.log
+        [ -f "$TMP_DIR/telecore_venv_err.log" ] && cat "$TMP_DIR/telecore_venv_err.log"
 
         # Check for Debian/Ubuntu python3-venv / ensurepip error
-        if grep -q "python3-venv" /tmp/telecore_venv_err.log || grep -q "ensurepip is not available" /tmp/telecore_venv_err.log; then
+        if [ -f "$TMP_DIR/telecore_venv_err.log" ] && (grep -q "python3-venv" "$TMP_DIR/telecore_venv_err.log" || grep -q "ensurepip is not available" "$TMP_DIR/telecore_venv_err.log"); then
             log_info "Auto-fixing missing python3-venv package on Debian/Ubuntu..."
             if [ "$PKG_MGR" = "apt" ]; then
                 $SUDO_CMD apt-get update -y
@@ -225,6 +231,9 @@ install_dependencies() {
             $VENV_PIP install -r requirements.txt || true
         elif [ "$PKG_MGR" = "apk" ]; then
             $SUDO_CMD apk add --no-cache gcc musl-dev python3-dev libffi-dev
+            $VENV_PIP install -r requirements.txt || true
+        elif [ "$PKG_MGR" = "pkg" ]; then
+            pkg install -y build-essential python-dev clang libffi openssl || true
             $VENV_PIP install -r requirements.txt || true
         fi
 
@@ -311,6 +320,11 @@ finish() {
     echo -e "  • Scaffold new module:  ${CYAN}python -m app.cli make:module <name>${NC}"
     echo -e "  • Run in Docker:        ${CYAN}docker compose up -d --build${NC}"
     echo ""
+    if [ "$OS" = "termux" ]; then
+        echo -e "${YELLOW}📱 Termux 24/7 Mobile Tip:${NC}"
+        echo -e "  Run: ${CYAN}termux-wake-lock${NC} to keep the bot active when screen is off!"
+        echo ""
+    fi
     echo -e "👨‍💻 ${BOLD}Developed with ❤️ by Bipin (@bipinone)${NC}"
     echo -e "📢 Channel:    https://t.me/BipinOne"
     echo -e "💬 Community:  https://t.me/BipinOneChat"
