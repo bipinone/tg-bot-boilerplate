@@ -2,8 +2,10 @@ import csv
 import io
 import os
 import datetime
+from typing import Optional
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -14,6 +16,8 @@ from aiogram.types import (
 from app.config import config
 from app.bot.filters.admin import IsAdminFilter, IsOwnerFilter
 from app.database.session import DatabaseSession
+from app.services.logger import TelegramLogService
+from app.modules.admin.states import AdminLogState
 
 router = Router(name="admin_module")
 router.message.filter(IsAdminFilter())
@@ -21,7 +25,7 @@ router.callback_query.filter(IsAdminFilter())
 
 VALID_ROLES = ("owner", "admin", "moderator", "user")
 
-async def build_panel_markup(db: DatabaseSession) -> tuple[str, InlineKeyboardMarkup]:
+async def build_panel_markup(db: DatabaseSession, tg_logger: Optional[TelegramLogService] = None) -> tuple[str, InlineKeyboardMarkup]:
     """Generates the real-time dynamic admin control dashboard and keyboard."""
     # 1. Force sub dynamic state
     fs_setting = await db.get_setting("force_sub_enabled")
@@ -36,7 +40,20 @@ async def build_panel_markup(db: DatabaseSession) -> tuple[str, InlineKeyboardMa
     maint_setting = await db.get_setting("maintenance_mode", "false")
     maint_enabled = maint_setting.lower() in ("true", "1", "yes", "on")
 
-    # 3. Overall stats
+    # 3. Dynamic Logging state
+    log_status_str = "⚪ <i>Not Configured</i>"
+    if tg_logger:
+        log_cfg = await tg_logger.get_effective_config()
+        if log_cfg["enabled"] and log_cfg["chat_id"]:
+            log_type_label = "💬 Topic Group" if log_cfg["thread_id"] or log_cfg.get("chat_type") == "topic_group" else "📢 Normal"
+            topic_str = f" (#{log_cfg['thread_id']})" if log_cfg["thread_id"] else ""
+            log_status_str = f"🟢 <b>ON</b> — <code>{log_cfg['chat_id']}</code> [{log_type_label}{topic_str}]"
+        elif log_cfg["chat_id"]:
+            log_status_str = f"🔴 <i>OFF</i> (<code>{log_cfg['chat_id']}</code>)"
+        else:
+            log_status_str = "⚪ <i>Not Set</i>"
+
+    # 4. Overall stats
     stats = await db.get_stats()
 
     fs_btn_text = "📢 Force-Sub: ON 🟢" if fs_enabled else "📢 Force-Sub: OFF 🔴"
@@ -45,6 +62,7 @@ async def build_panel_markup(db: DatabaseSession) -> tuple[str, InlineKeyboardMa
     text = (
         "🎛️ <b>TeleCore Dynamic Management Panel</b>\n\n"
         "⚡ <b>Live System & Feature Status:</b>\n"
+        f"• <b>Logs Channel/Group:</b> {log_status_str}\n"
         f"• <b>Force Subscription:</b> {'🟢 <b>ACTIVE</b>' if fs_enabled else '🔴 <i>DISABLED</i>'}\n"
         f"  └ Target Channel: <code>{fs_channel}</code>\n"
         f"• <b>Maintenance Mode:</b> {'⚠️ <b>ACTIVE (Admins Only)</b>' if maint_enabled else '🟢 <i>OFF (Public Access)</i>'}\n"
@@ -57,31 +75,85 @@ async def build_panel_markup(db: DatabaseSession) -> tuple[str, InlineKeyboardMa
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="📑 Logs Settings", callback_data="admin_panel:logs"),
+            InlineKeyboardButton(text="👑 Staff Directory", callback_data="admin_panel:staff"),
+        ],
+        [
             InlineKeyboardButton(text=fs_btn_text, callback_data="admin_toggle:forcesub"),
             InlineKeyboardButton(text=maint_btn_text, callback_data="admin_toggle:maintenance"),
         ],
         [
-            InlineKeyboardButton(text="👑 Staff Directory", callback_data="admin_panel:staff"),
             InlineKeyboardButton(text="📊 Detailed Stats", callback_data="admin_panel:stats"),
+            InlineKeyboardButton(text="🔄 Refresh", callback_data="admin_panel:refresh"),
         ],
         [
-            InlineKeyboardButton(text="🔄 Refresh", callback_data="admin_panel:refresh"),
             InlineKeyboardButton(text="❌ Close", callback_data="admin_panel:close"),
         ]
     ])
 
     return text, keyboard
 
+
+async def build_logs_panel_markup(db: DatabaseSession, tg_logger: TelegramLogService) -> tuple[str, InlineKeyboardMarkup]:
+    """Generates the dedicated logs configuration dashboard."""
+    cfg = await tg_logger.get_effective_config()
+    is_enabled = cfg["enabled"] and bool(cfg["chat_id"])
+    has_chat = bool(cfg["chat_id"])
+    is_topic = bool(cfg["thread_id"]) or cfg.get("chat_type") == "topic_group"
+
+    status_icon = "🟢 <b>ACTIVE</b>" if is_enabled else ("🔴 <i>DISABLED</i>" if has_chat else "⚪ <i>NOT CONFIGURED</i>")
+    dest_str = f"<code>{cfg['chat_id']}</code>" if has_chat else "<i>None (Not Set)</i>"
+    type_str = "💬 Forum Topic Supergroup" if is_topic else "📢 Standard Channel / Group"
+    topic_str = f"<code>#{cfg['thread_id']}</code>" if cfg["thread_id"] else "<i>Main Chat / None</i>"
+    user_topics_str = "🟢 <b>Enabled</b> (1 Topic Per User)" if cfg["user_topics"] else "⚪ <i>Disabled</i>"
+
+    text = (
+        "📑 <b>Telegram Logs Configuration Dashboard</b>\n\n"
+        f"• <b>Logging Status:</b> {status_icon}\n"
+        f"• <b>Target Destination:</b> {dest_str}\n"
+        f"• <b>Destination Type:</b> {type_str}\n"
+        f"• <b>Default Topic/Thread:</b> {topic_str}\n"
+        f"• <b>Auto User Topics:</b> {user_topics_str}\n\n"
+        "<i>Configure your logging channel or forum topic group below:</i>"
+    )
+
+    toggle_btn_text = "🔴 Disable Logging" if cfg["enabled"] else "🟢 Enable Logging"
+    user_topics_btn_text = "👤 User Topics: ON 🟢" if cfg["user_topics"] else "👤 User Topics: OFF ⚪"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=toggle_btn_text, callback_data="admin_toggle:logging"),
+            InlineKeyboardButton(text="🧪 Send Test Log", callback_data="admin_action:test_log"),
+        ],
+        [
+            InlineKeyboardButton(text="📢 Set Normal Channel/Group", callback_data="admin_prompt:log_chat"),
+            InlineKeyboardButton(text="💬 Set Topic Supergroup", callback_data="admin_prompt:log_topic_chat"),
+        ],
+        [
+            InlineKeyboardButton(text="📌 Set Topic/Thread ID", callback_data="admin_prompt:log_thread"),
+            InlineKeyboardButton(text=user_topics_btn_text, callback_data="admin_toggle:user_topics"),
+        ],
+        [
+            InlineKeyboardButton(text="🗑️ Reset / Disconnect Logs", callback_data="admin_action:reset_logs"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Back to Control Panel", callback_data="admin_panel:refresh"),
+        ]
+    ])
+    return text, keyboard
+
+
 # --- Admin Panel Commands ---
 
 @router.message(Command("panel", "settings"))
-async def admin_panel_cmd(message: Message, db: DatabaseSession):
+async def admin_panel_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
     """Displays the dynamic in-bot configuration dashboard."""
-    text, keyboard = await build_panel_markup(db)
+    text, keyboard = await build_panel_markup(db, tg_logger)
     await message.reply(text, reply_markup=keyboard, parse_mode="HTML")
 
+
 @router.callback_query(F.data.startswith("admin_toggle:"))
-async def admin_toggle_callback(callback: CallbackQuery, db: DatabaseSession):
+async def admin_toggle_callback(callback: CallbackQuery, db: DatabaseSession, tg_logger: TelegramLogService):
     """Handles real-time setting toggles from the control panel."""
     action = callback.data.split(":")[1]
 
@@ -91,6 +163,11 @@ async def admin_toggle_callback(callback: CallbackQuery, db: DatabaseSession):
         new_val = "false" if current else "true"
         await db.set_setting("force_sub_enabled", new_val)
         await callback.answer(f"Force-Sub set to: {'ENABLED' if new_val == 'true' else 'DISABLED'}")
+        text, keyboard = await build_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
 
     elif action == "maintenance":
         maint_setting = await db.get_setting("maintenance_mode", "false")
@@ -98,27 +175,146 @@ async def admin_toggle_callback(callback: CallbackQuery, db: DatabaseSession):
         new_val = "false" if current else "true"
         await db.set_setting("maintenance_mode", new_val)
         await callback.answer(f"Maintenance Mode: {'ACTIVATED' if new_val == 'true' else 'DEACTIVATED'}")
+        text, keyboard = await build_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
 
-    text, keyboard = await build_panel_markup(db)
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        pass
+    elif action == "logging":
+        cfg = await tg_logger.get_effective_config()
+        new_val = "false" if cfg["enabled"] else "true"
+        await db.set_setting("log_enabled", new_val)
+        await callback.answer(f"Logging is now: {'ENABLED' if new_val == 'true' else 'DISABLED'}")
+        text, keyboard = await build_logs_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+
+    elif action == "user_topics":
+        cfg = await tg_logger.get_effective_config()
+        new_val = "false" if cfg["user_topics"] else "true"
+        await db.set_setting("log_user_topics", new_val)
+        await callback.answer(f"Per-User Forum Topics: {'ENABLED' if new_val == 'true' else 'DISABLED'}")
+        text, keyboard = await build_logs_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+
+
+@router.callback_query(F.data.startswith("admin_action:"))
+async def admin_action_callback(callback: CallbackQuery, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Handles log actions like testing or resetting."""
+    action = callback.data.split(":")[1]
+
+    if action == "test_log":
+        cfg = await tg_logger.get_effective_config()
+        if not cfg["chat_id"]:
+            await callback.answer("⚠️ No log destination configured! Please set a channel or group first.", show_alert=True)
+            return
+
+        await callback.answer("Sending verification test log...")
+        ok, msg, _ = await tg_logger.test_connection(cfg["chat_id"], cfg["thread_id"])
+        if ok:
+            await callback.message.reply(
+                f"✅ <b>Test Log Delivered Successfully!</b>\n\n"
+                f"• <b>Destination:</b> <code>{cfg['chat_id']}</code>\n"
+                f"• <b>Topic ID:</b> <code>{cfg['thread_id'] or 'None (Main Chat)'}</code>\n"
+                f"• <b>Result:</b> {msg}",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.reply(
+                f"❌ <b>Test Log Delivery Failed</b>\n\n"
+                f"• <b>Destination:</b> <code>{cfg['chat_id']}</code>\n"
+                f"• <b>Error:</b> <code>{msg}</code>\n\n"
+                "<i>Make sure the bot has Administrator permissions in the target channel/group!</i>",
+                parse_mode="HTML"
+            )
+
+    elif action == "reset_logs":
+        await db.set_setting("log_chat_id", "")
+        await db.set_setting("log_thread_id", "")
+        await db.set_setting("log_enabled", "false")
+        await callback.answer("Logging destination reset and disabled.", show_alert=True)
+        text, keyboard = await build_logs_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+
+
+@router.callback_query(F.data.startswith("admin_prompt:"))
+async def admin_prompt_callback(callback: CallbackQuery, state: FSMContext):
+    """Initiates interactive FSM input for log settings."""
+    prompt_type = callback.data.split(":")[1]
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="admin_panel:logs")]
+    ])
+
+    if prompt_type == "log_chat":
+        await state.set_state(AdminLogState.waiting_for_chat)
+        await state.update_data(mode="normal")
+        await callback.message.edit_text(
+            "📢 <b>Set Normal Channel / Group for Logs</b>\n\n"
+            "Forward any message from your target channel/group, or send its <code>-100...</code> Chat ID or <code>@username</code>:\n\n"
+            "<i>(Make sure the bot is already an Admin in that channel/group)</i>",
+            reply_markup=cancel_kb,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+
+    elif prompt_type == "log_topic_chat":
+        await state.set_state(AdminLogState.waiting_for_chat)
+        await state.update_data(mode="topic")
+        await callback.message.edit_text(
+            "💬 <b>Set Forum Topic Supergroup for Logs</b>\n\n"
+            "Forward a message from your Supergroup (with Topics enabled), or send its <code>-100...</code> Chat ID:\n\n"
+            "<i>(Bot must be an Admin with Manage Topics permission. You will choose a specific Topic next)</i>",
+            reply_markup=cancel_kb,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+
+    elif prompt_type == "log_thread":
+        await state.set_state(AdminLogState.waiting_for_thread)
+        await callback.message.edit_text(
+            "📌 <b>Set Specific Topic / Thread ID</b>\n\n"
+            "Enter the numeric Forum Topic ID (e.g. <code>2</code>, <code>145</code>), or send <code>0</code> / <code>off</code> to log in the General chat:\n\n"
+            "<i>(Tip: In Telegram, right-click/long-press any topic and copy link to see its message_thread_id)</i>",
+            reply_markup=cancel_kb,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+
 
 @router.callback_query(F.data.startswith("admin_panel:"))
-async def admin_panel_action_callback(callback: CallbackQuery, db: DatabaseSession):
+async def admin_panel_action_callback(callback: CallbackQuery, db: DatabaseSession, tg_logger: TelegramLogService, state: FSMContext):
     """Handles secondary panel actions."""
     action = callback.data.split(":")[1]
 
     if action == "refresh":
-        text, keyboard = await build_panel_markup(db)
+        await state.clear()
+        text, keyboard = await build_panel_markup(db, tg_logger)
         try:
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         except Exception:
             pass
         await callback.answer("Panel refreshed ✅")
 
+    elif action == "logs":
+        await state.clear()
+        text, keyboard = await build_logs_panel_markup(db, tg_logger)
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+        await callback.answer()
+
     elif action == "close":
+        await state.clear()
         await callback.message.delete()
         await callback.answer("Panel closed")
 
@@ -154,6 +350,288 @@ async def admin_panel_action_callback(callback: CallbackQuery, db: DatabaseSessi
         ])
         await callback.message.edit_text(stats_text, reply_markup=back_kb, parse_mode="HTML")
         await callback.answer()
+
+# --- Dynamic Logs Group & Topic Configuration ---
+
+@router.message(Command("cancel"), AdminLogState.waiting_for_chat)
+@router.message(Command("cancel"), AdminLogState.waiting_for_thread)
+async def admin_cancel_log_setup(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Cancels ongoing log setup and returns to logs dashboard."""
+    await state.clear()
+    text, kb = await build_logs_panel_markup(db, tg_logger)
+    await message.reply("❌ Log setup cancelled.", reply_markup=kb, parse_mode="HTML")
+
+@router.message(AdminLogState.waiting_for_chat)
+async def admin_log_chat_input(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Receives target chat ID or forwarded message for logging."""
+    target_chat = None
+
+    if message.forward_from_chat:
+        target_chat = message.forward_from_chat.id
+    elif message.text:
+        raw = message.text.strip()
+        if raw.startswith("http"):
+            parts = raw.rstrip("/").split("/")
+            if "t.me" in parts:
+                idx = parts.index("t.me") if "t.me" in parts else -1
+                if idx != -1 and len(parts) > idx + 1:
+                    raw = parts[idx + 1]
+                    if raw == "c" and len(parts) > idx + 2:
+                        raw = "-100" + parts[idx + 2]
+        try:
+            target_chat = int(raw)
+        except ValueError:
+            target_chat = raw if raw.startswith("@") else f"@{raw}"
+
+    if not target_chat:
+        await message.reply("⚠️ Could not detect chat. Please send a valid Chat ID (e.g. <code>-1001234567890</code>) or <code>@username</code>:", parse_mode="HTML")
+        return
+
+    status_msg = await message.reply("⏳ <i>Verifying connectivity and bot admin permissions...</i>", parse_mode="HTML")
+    ok, detail, chat_type = await tg_logger.test_connection(target_chat)
+
+    if not ok:
+        await status_msg.edit_text(
+            f"❌ <b>Connection Test Failed for <code>{target_chat}</code></b>\n\n"
+            f"• <b>Error:</b> <code>{detail}</code>\n\n"
+            "<b>Troubleshooting:</b>\n"
+            "1. Did you add the bot to that channel/group?\n"
+            "2. Did you promote the bot to <b>Administrator</b> with 'Post Messages' permissions?\n\n"
+            "<i>Send another ID to retry, or send <code>/cancel</code> to abort.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    await db.set_setting("log_chat_id", str(target_chat))
+    await db.set_setting("log_enabled", "true")
+
+    data = await state.get_data()
+    mode = data.get("mode", "normal")
+
+    if mode == "topic":
+        await db.set_setting("log_chat_type", "topic_group")
+        await state.set_state(AdminLogState.waiting_for_thread)
+        await status_msg.edit_text(
+            f"✅ <b>Connected to Forum Supergroup!</b>\n\n"
+            f"• <b>Chat:</b> <code>{target_chat}</code> ({chat_type})\n\n"
+            "👉 Now, enter the <b>Topic ID</b> (thread ID) where logs should go (e.g. <code>2</code>, <code>145</code>), "
+            "or send <code>0</code> / <code>general</code> to log in General:",
+            parse_mode="HTML"
+        )
+    else:
+        await db.set_setting("log_chat_type", "channel_or_group")
+        await state.clear()
+        text, kb = await build_logs_panel_markup(db, tg_logger)
+        await status_msg.edit_text(
+            f"🎉 <b>Logging Destination Connected!</b>\n\n"
+            f"• <b>Destination:</b> <code>{target_chat}</code>\n"
+            f"• <b>Type:</b> <code>{chat_type}</code>\n"
+            f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
+            "<i>A verification message was delivered to the chat.</i>",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+@router.message(AdminLogState.waiting_for_thread)
+async def admin_log_thread_input(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Receives target topic thread ID for forum supergroups."""
+    raw = message.text.strip().lower()
+    cfg = await tg_logger.get_effective_config()
+
+    if raw in ("0", "off", "none", "general"):
+        await db.set_setting("log_thread_id", "")
+        await db.set_setting("log_chat_type", "channel_or_group")
+        await state.clear()
+        text, kb = await build_logs_panel_markup(db, tg_logger)
+        await message.reply(
+            "✅ <b>Default topic cleared!</b>\nLogs will now be delivered to the main/general chat.",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+
+    if not raw.isdigit():
+        await message.reply("⚠️ Please enter a numeric Topic ID (e.g. <code>2</code>) or send <code>0</code> for General:", parse_mode="HTML")
+        return
+
+    thread_id = int(raw)
+    status_msg = await message.reply(f"⏳ <i>Testing delivery to Topic #{thread_id}...</i>", parse_mode="HTML")
+    ok, detail, _ = await tg_logger.test_connection(cfg["chat_id"], thread_id=thread_id)
+
+    if not ok:
+        await status_msg.edit_text(
+            f"❌ <b>Failed to post in Topic #{thread_id}</b>\n\n"
+            f"• <b>Error:</b> <code>{detail}</code>\n\n"
+            "<i>Verify that this topic exists and the bot has permission to post in it, or send another ID.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    await db.set_setting("log_thread_id", str(thread_id))
+    await db.set_setting("log_chat_type", "topic_group")
+    await state.clear()
+    text, kb = await build_logs_panel_markup(db, tg_logger)
+    await status_msg.edit_text(
+        f"🎉 <b>Forum Topic Configured Successfully!</b>\n\n"
+        f"• <b>Supergroup:</b> <code>{cfg['chat_id']}</code>\n"
+        f"• <b>Topic ID:</b> <code>#{thread_id}</code>\n"
+        f"• <b>Status:</b> 🟢 <b>Active</b>",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+# --- Direct Admin Commands for Logs ---
+
+@router.message(Command("logs", "logsettings", "log_settings"))
+async def admin_logs_menu_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Opens the logs configuration menu."""
+    text, kb = await build_logs_panel_markup(db, tg_logger)
+    await message.reply(text, reply_markup=kb, parse_mode="HTML")
+
+@router.message(Command("logson"))
+async def admin_logson_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
+    """Turns logs ON dynamically."""
+    await db.set_setting("log_enabled", "true")
+    cfg = await tg_logger.get_effective_config()
+    dest = f"<code>{cfg['chat_id']}</code>" if cfg['chat_id'] else "<i>(Not Set yet - use /setlogs)</i>"
+    await message.reply(f"🟢 <b>Telegram Logging Activated</b>\nDestination: {dest}", parse_mode="HTML")
+
+@router.message(Command("logsoff"))
+async def admin_logsoff_cmd(message: Message, db: DatabaseSession):
+    """Turns logs OFF dynamically."""
+    await db.set_setting("log_enabled", "false")
+    await message.reply("🔴 <b>Telegram Logging Deactivated</b>", parse_mode="HTML")
+
+@router.message(Command("setlogs", "set_logs"))
+async def admin_setlogs_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
+    """
+    Directly set logs destination with optional topic ID.
+    Usage:
+      /setlogs <chat_id_or_username> [topic_id]
+    Examples:
+      /setlogs -1001234567890
+      /setlogs -1001234567890 4
+      /setlogs @my_channel
+    """
+    args = message.text.split()[1:]
+    if not args:
+        await message.reply(
+            "⚠️ <b>Usage:</b> <code>/setlogs &lt;chat_id_or_username&gt; [topic_id]</code>\n\n"
+            "<b>Examples:</b>\n"
+            "• Normal channel/group: <code>/setlogs -1001234567890</code>\n"
+            "• With specific Topic ID: <code>/setlogs -1001234567890 4</code>\n"
+            "• Public channel: <code>/setlogs @my_alerts</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    raw_chat = args[0].strip()
+    try:
+        target_chat = int(raw_chat)
+    except ValueError:
+        target_chat = raw_chat if raw_chat.startswith("@") else f"@{raw_chat}"
+
+    thread_id = None
+    if len(args) > 1 and args[1].isdigit():
+        thread_id = int(args[1])
+
+    status_msg = await message.reply("⏳ <i>Testing connection and permissions...</i>", parse_mode="HTML")
+    ok, detail, chat_type = await tg_logger.test_connection(target_chat, thread_id)
+
+    if not ok:
+        await status_msg.edit_text(
+            f"❌ <b>Could not connect to {target_chat}</b>\n\n"
+            f"• <b>Error:</b> <code>{detail}</code>\n\n"
+            "<i>Make sure the bot has been added as Administrator in the target chat with post permissions.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    await db.set_setting("log_chat_id", str(target_chat))
+    await db.set_setting("log_enabled", "true")
+    if thread_id:
+        await db.set_setting("log_thread_id", str(thread_id))
+        await db.set_setting("log_chat_type", "topic_group")
+    else:
+        await db.set_setting("log_chat_type", "channel_or_group")
+
+    topic_info = f"\n• <b>Topic ID:</b> <code>#{thread_id}</code>" if thread_id else ""
+    await status_msg.edit_text(
+        f"✅ <b>Logging Destination Successfully Configured!</b>\n\n"
+        f"• <b>Destination:</b> <code>{target_chat}</code>\n"
+        f"• <b>Chat Type:</b> <code>{chat_type}</code>{topic_info}\n"
+        f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
+        "<i>All system events and error reports will now be delivered here.</i>",
+        parse_mode="HTML"
+    )
+
+@router.message(Command("setlogtopic", "set_log_topic"))
+async def admin_setlogtopic_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
+    """
+    Sets or clears the default topic/thread ID.
+    Usage: /setlogtopic <topic_id|off>
+    """
+    args = message.text.split()[1:]
+    if not args:
+        await message.reply(
+            "⚠️ <b>Usage:</b> <code>/setlogtopic &lt;topic_id|off&gt;</code>\n"
+            "Example: <code>/setlogtopic 4</code> (or <code>/setlogtopic off</code>)",
+            parse_mode="HTML"
+        )
+        return
+
+    raw = args[0].strip().lower()
+    if raw in ("off", "0", "none", "clear"):
+        await db.set_setting("log_thread_id", "")
+        await db.set_setting("log_chat_type", "channel_or_group")
+        await message.reply("✅ <b>Topic routing disabled.</b> Logs will be sent to the main chat.", parse_mode="HTML")
+        return
+
+    if not raw.isdigit():
+        await message.reply("⚠️ Topic ID must be numeric (e.g. <code>4</code>) or <code>off</code>.", parse_mode="HTML")
+        return
+
+    thread_id = int(raw)
+    cfg = await tg_logger.get_effective_config()
+    if not cfg["chat_id"]:
+        await message.reply("⚠️ Please configure the log supergroup first via <code>/setlogs &lt;chat_id&gt;</code>.", parse_mode="HTML")
+        return
+
+    status_msg = await message.reply(f"⏳ <i>Testing Topic #{thread_id}...</i>", parse_mode="HTML")
+    ok, detail, _ = await tg_logger.test_connection(cfg["chat_id"], thread_id)
+    if not ok:
+        await status_msg.edit_text(f"❌ <b>Error posting to Topic #{thread_id}:</b> <code>{detail}</code>", parse_mode="HTML")
+        return
+
+    await db.set_setting("log_thread_id", str(thread_id))
+    await db.set_setting("log_chat_type", "topic_group")
+    await status_msg.edit_text(f"✅ <b>Default log topic updated to #{thread_id}!</b>", parse_mode="HTML")
+
+@router.message(Command("testlog", "test_log"))
+async def admin_test_log_cmd(message: Message, tg_logger: TelegramLogService):
+    """Sends a verification test log to the currently active destination."""
+    cfg = await tg_logger.get_effective_config()
+    if not cfg["chat_id"]:
+        await message.reply("⚠️ No log destination configured! Use <code>/setlogs &lt;chat_id&gt;</code> first.", parse_mode="HTML")
+        return
+
+    status_msg = await message.reply("⏳ <i>Sending test log...</i>", parse_mode="HTML")
+    ok, detail, chat_type = await tg_logger.test_connection(cfg["chat_id"], cfg["thread_id"])
+    if ok:
+        topic_info = f" (Topic #{cfg['thread_id']})" if cfg["thread_id"] else ""
+        await status_msg.edit_text(
+            f"✅ <b>Test log delivered successfully!</b>\n\n"
+            f"• <b>Destination:</b> <code>{cfg['chat_id']}</code>{topic_info}\n"
+            f"• <b>Type:</b> <code>{chat_type}</code>\n"
+            f"• <b>Status:</b> 🟢 Connected",
+            parse_mode="HTML"
+        )
+    else:
+        await status_msg.edit_text(
+            f"❌ <b>Delivery Failed:</b>\n<code>{detail}</code>\n\n"
+            "<i>Ensure the bot has admin permissions in the destination chat.</i>",
+            parse_mode="HTML"
+        )
 
 # --- Force Subscription Configuration Commands ---
 

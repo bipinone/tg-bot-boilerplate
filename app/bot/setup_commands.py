@@ -39,6 +39,7 @@ async def setup_bot_metadata(bot: Bot) -> None:
         BotCommand(command="panel", description="🎛️ Real-time Admin Control Panel"),
         BotCommand(command="stats", description="📊 Live user & system analytics"),
         BotCommand(command="broadcast", description="📢 Mass announcement engine"),
+        BotCommand(command="logs", description="📑 Real-time Logs & Topic setup"),
         BotCommand(command="admins", description="👑 Staff & role directory"),
         BotCommand(command="groups", description="👥 Registered communities"),
         BotCommand(command="export", description="📁 Export users database to CSV"),

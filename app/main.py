@@ -176,7 +176,7 @@ async def main():
     )
 
     db = DatabaseSession.from_config(config.db)
-    tg_logger = TelegramLogService(bot)
+    tg_logger = TelegramLogService(bot, db=db)
     dp = create_dispatcher(db, tg_logger)
 
     # Start Cloud Health Server (concurrent liveness probe)

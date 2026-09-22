@@ -146,6 +146,7 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         logger_service = TelegramLogService(mock_bot)
         logger_service.chat_id = -1001234567890
         logger_service.default_thread_id = 42
+        logger_service.create_user_topics = True
 
         # 1. Test log send with default topic thread_id
         await logger_service.send_log("Test log")
@@ -456,6 +457,74 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         # Verify bipinone credit in short description
         short_desc_args = mock_bot.set_my_short_description.call_args[1]
         self.assertIn("bipinone", short_desc_args["short_description"].lower())
+
+    async def test_dynamic_logs_settings(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.services.logger import TelegramLogService
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(return_value=True)
+        mock_chat = MagicMock()
+        mock_chat.title = "Test Group"
+        mock_chat.type = "supergroup"
+        mock_chat.username = "testgroup"
+        mock_bot.get_chat = AsyncMock(return_value=mock_chat)
+
+        logger_service = TelegramLogService(mock_bot, db=self.db)
+
+        # 1. Default when unset
+        cfg = await logger_service.get_effective_config()
+        self.assertIn("enabled", cfg)
+
+        # 2. Dynamic DB configuration: normal channel/group
+        await self.db.set_setting("log_chat_id", "-1009999999999")
+        await self.db.set_setting("log_enabled", "true")
+        await self.db.set_setting("log_chat_type", "channel_or_group")
+
+        cfg = await logger_service.get_effective_config()
+        self.assertTrue(cfg["enabled"])
+        self.assertEqual(cfg["chat_id"], -1009999999999)
+        self.assertIsNone(cfg["thread_id"])
+
+        # Send log should use new dynamic chat
+        await logger_service.send_log("Dynamic normal log")
+        mock_bot.send_message.assert_called_with(
+            chat_id=-1009999999999,
+            text="Dynamic normal log",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+
+        # 3. Dynamic DB configuration: topic group
+        await self.db.set_setting("log_thread_id", "77")
+        await self.db.set_setting("log_chat_type", "topic_group")
+
+        cfg = await logger_service.get_effective_config()
+        self.assertEqual(cfg["thread_id"], 77)
+
+        await logger_service.send_log("Topic log")
+        mock_bot.send_message.assert_called_with(
+            chat_id=-1009999999999,
+            text="Topic log",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            message_thread_id=77
+        )
+
+        # 4. Dynamic turn OFF
+        await self.db.set_setting("log_enabled", "false")
+        cfg = await logger_service.get_effective_config()
+        self.assertFalse(cfg["enabled"])
+
+        mock_bot.send_message.reset_mock()
+        sent = await logger_service.send_log("Disabled log")
+        self.assertFalse(sent)
+        mock_bot.send_message.assert_not_called()
+
+        # 5. Test connection
+        ok, msg, c_type = await logger_service.test_connection(-1009999999999, thread_id=77)
+        self.assertTrue(ok)
+        self.assertEqual(c_type, "supergroup")
 
 
 if __name__ == "__main__":
