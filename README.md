@@ -26,7 +26,49 @@
 
 Most Telegram bot starters provide only a basic `/start` handler, forcing developers to rebuild user persistence, rate limiting, administrative tools, and broadcast engines repeatedly for every new project.
 
-**TeleCore** is a modular, feature-flagged architecture designed to serve as the immediate base for any Telegram bot project — whether you are building an AI assistant, a community manager, a subscription SaaS, a referral campaign, or a Telegram Mini App.
+**TeleCore** is an extensible, production-oriented starter kit designed to serve as the immediate base for any Telegram bot project — whether you are building an AI assistant, a community manager, a subscription SaaS, a referral campaign, an e-commerce storefront, or a Telegram Mini App.
+
+---
+
+### System Architecture
+
+```text
+                                Telegram Bot API
+                                       │
+                                       ▼
+                     ┌──────────────────────────────────┐
+                     │   aiogram 3.x Dispatcher Core    │
+                     └──────────────────────────────────┘
+                                       │
+                       [ Global Middleware Pipeline ]
+                                       │
+          ┌────────────────────────────┼────────────────────────────┐
+          ▼                            ▼                            ▼
+   Rate Limiting               Ban & Maintenance             Multi-Language
+ (Sliding Window)             (Instant Eviction)             (i18n Resolver)
+          │                            │                            │
+          └────────────────────────────┼────────────────────────────┘
+                                       │
+                                       ▼
+                       [ Pluggable Feature Routers ]
+      ┌──────────────┬──────────────┬──────────────┬──────────────┐
+      │              │              │              │              │
+    Admin        Broadcast     Subscriptions       AI          Groups / CRM
+   (/panel)    (-copy, -pin)   (Free/Pro/VIP)  (Multi-LLM)     (Topic Relay)
+      │              │              │              │              │
+      └──────────────┴──────────────┼──────────────┴──────────────┘
+                                       │
+                                       ▼
+                 ┌───────────────────────────────────────────┐
+                 │  High-Performance DatabaseSession (DAL)   │
+                 │   └─ In-Memory Sub-Millisecond TTL Cache  │
+                 └───────────────────────────────────────────┘
+                                       │
+            ┌──────────────┬───────────┴──┬──────────────┐
+            ▼              ▼              ▼              ▼
+         SQLite        PostgreSQL       MySQL         MongoDB
+       (aiosqlite)     (asyncpg)      (aiomysql)      (motor)
+```
 
 ---
 
@@ -34,9 +76,9 @@ Most Telegram bot starters provide only a basic `/start` handler, forcing develo
 
 - **Async Core & Blazing Speed**: Built on Python 3.10+ and `aiogram 3.x` with native `uvloop` C-based event loops, `orjson` serialization, and sub-millisecond in-memory TTL caching.
 - **Multi-Database Provider (Pluggable DAL)**: Native async driver support for **SQLite** (`aiosqlite`), **PostgreSQL** (`asyncpg`), **MySQL/MariaDB** (`aiomysql`), and **MongoDB** (`motor`). Switch engines simply by setting `DB_TYPE` or `DATABASE_URL`!
-- **Internationalization (i18n)**: Seamless multi-language support (English, Hindi) with per-user language preference and `/language` selector.
-- **Subscriptions & Entitlements**: Decoupled SaaS membership engine (Free, Pro, VIP tiers) with expiry tracking and access gates.
-- **Community & Group Engine**: Group event listeners, supergroup forum topic handling, and group-level settings.
+- **Internationalization (i18n)**: Clean multi-language architecture (English, Hindi) with per-user preference stored in DB, translation helper `_()`, and an interactive `/language` menu.
+- **Subscriptions & Entitlements Engine**: Decoupled SaaS membership engine (Free, Pro, VIP tiers) with expiry tracking, renewal reminders, and entitlement gates.
+- **Community & Group Engine**: Automatic group registration on bot join, supergroup forum topic handling, and group-level configuration.
 - **Background Task Scheduler**: Async recurring job scheduler for daily routines, subscription expiry notifications, and database cleanup.
 - **Flag-Based Mass Broadcast**: High-speed broadcast engine supporting flags (`-copy`, `-pin`, `-silent`, `-fast`), live visual progress bars, and pause/resume/cancel controls.
 - **AI Engine**: Multi-provider LLM support (OpenAI, Gemini, Anthropic, Custom endpoints) with per-user conversation memory.
@@ -69,7 +111,6 @@ TeleCore features an isolated, modular architecture where features can be toggle
 | **Health & Metrics** | `services/health.py` | Embedded HTTP server (`/health`, `/metrics`) preventing cloud sleeping. |
 | **Payments** | `modules/payments/` | Digital goods checkout and Telegram Stars (`XTR`) handlers. |
 
-
 ---
 
 ### Project Structure
@@ -78,36 +119,45 @@ TeleCore features an isolated, modular architecture where features can be toggle
 tg-bot-boilerplate/
 ├── app/
 │   ├── bot/
-│   │   ├── filters/           # Custom filters (e.g., IsAdminFilter)
-│   │   ├── handlers/          # Common application handlers (/start, /help, /ping)
+│   │   ├── filters/           # Custom filters (IsAdminFilter, IsOwnerFilter)
+│   │   ├── handlers/          # Core handlers (/start, /help, /ping)
 │   │   ├── keyboards/         # Reusable inline and reply keyboards
-│   │   ├── middlewares/       # Anti-flood rate limiting and logging
+│   │   ├── middlewares/       # Anti-flood, ban checks, and i18n
 │   │   └── states/            # Finite State Machine (FSM) definitions
 │   │
 │   ├── database/
-│   │   ├── models/            # Schema definitions
-│   │   └── session.py         # Async SQLite / PostgreSQL persistence engine
+│   │   ├── adapters/          # Engine adapters (sqlite, postgres, mysql, mongo)
+│   │   ├── base.py            # Abstract Base Database Provider interface
+│   │   ├── cache.py           # Sub-millisecond in-memory TTL cache
+│   │   ├── factory.py         # Dynamic connection string resolution
+│   │   └── session.py         # Unified DatabaseSession with auto-caching
 │   │
 │   ├── modules/               # Pluggable feature modules
-│   │   ├── admin/             # Admin commands and metrics
-│   │   ├── broadcast/         # Mass messaging engine
+│   │   ├── admin/             # Admin dashboard, stats, RBAC, moderation
+│   │   ├── ai/                # Multi-provider LLM queries & conversation memory
+│   │   ├── broadcast/         # Mass messaging engine with visual progress bar
 │   │   ├── force_sub/         # Channel gatekeeper middleware
-│   │   ├── referrals/         # Deep-linking referral system
-│   │   ├── ai/                # LLM & AI integrations
-│   │   ├── payments/          # Telegram Stars and invoice processing
-│   │   └── miniapp/           # WebApp integration
+│   │   ├── groups/            # Community registrations and event listeners
+│   │   ├── i18n/              # Localization locales, service, and router
+│   │   ├── miniapp/           # WebApp integration launcher
+│   │   ├── payments/          # Digital goods and Telegram Stars checkout
+│   │   ├── referrals/         # Deep-link referral tracking and rewards
+│   │   ├── scheduler/         # Background recurring job engine
+│   │   └── support/           # Two-way supergroup topic CRM relay
 │   │
-│   ├── services/              # Background tasks and caching utilities
+│   ├── services/              # Logger, health server, background helpers
+│   ├── cli.py                 # TeleCore Developer CLI (make:module, db:seed)
 │   ├── config.py              # Strongly-typed environment configuration
-│   └── main.py                # Dispatcher assembly and runner (Polling/Webhook)
+│   └── main.py                # Dispatcher assembly and runner
 │
+├── scripts/
+│   └── setup.sh               # One-command automated onboarding script
 ├── tests/
-│   └── test_framework.py      # Automated unit test suite
-├── docker-compose.yml         # Multi-container orchestration (App + Redis)
+│   └── test_framework.py      # Automated unit test suite (17 test cases)
+├── docker-compose.yml         # Container orchestration (App + Redis)
 ├── Dockerfile                 # Multi-stage production container
-├── Makefile                   # Development workflow shortcuts
-├── pyproject.toml             # Package metadata and dependencies
-├── requirements.txt           # Production requirements
+├── Makefile                   # Developer workflow shortcuts
+├── requirements.txt           # Production dependencies
 └── README.md
 ```
 
@@ -115,70 +165,120 @@ tg-bot-boilerplate/
 
 ### Quick Start
 
-#### 1. Clone the Repository
+#### Method A: One-Command Automated Setup
 
 ```bash
 git clone https://github.com/bipinone/tg-bot-boilerplate.git
 cd tg-bot-boilerplate
+chmod +x scripts/setup.sh
+./scripts/setup.sh
 ```
 
-#### 2. Configure Environment
-
-Copy the configuration template:
+#### Method B: Manual Virtual Environment
 
 ```bash
-cp .env.example .env
-```
+# 1. Clone repository
+git clone https://github.com/bipinone/tg-bot-boilerplate.git
+cd tg-bot-boilerplate
 
-Set your Bot Token from [@BotFather](https://t.me/BotFather) and your Telegram User ID:
-
-```ini
-BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
-ADMIN_IDS=123456789
-RATE_LIMIT_SECONDS=1.0
-
-# Choose your database backend (sqlite | postgres | mysql | mongo):
-DB_TYPE=sqlite
-SQLITE_PATH=bot_database.sqlite3
-
-# Or provide a universal connection string:
-# DATABASE_URL=postgresql://user:password@localhost:5432/telecore_bot
-# DATABASE_URL=mysql://user:password@localhost:3306/telecore_bot
-# DATABASE_URL=mongodb://localhost:27017/telecore_bot
-
-# Toggle feature modules
-ENABLE_MODULE_ADMIN=true
-ENABLE_MODULE_BROADCAST=true
-ENABLE_MODULE_REFERRALS=true
-ENABLE_MODULE_FORCE_SUB=false
-```
-
-
-#### 3. Run Locally
-
-```bash
-# Create and activate virtual environment
+# 2. Setup virtual environment
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# Launch bot
+# 4. Configure environment
+cp .env.example .env
+# Edit .env and insert your BOT_TOKEN from @BotFather
+
+# 5. Launch bot
 python -m app.main
+```
+
+---
+
+### Multi-Database Configuration
+
+TeleCore is designed with a **Universal Database Abstraction Layer**. You can switch database backends at any time without altering application code.
+
+Simply configure `.env`:
+
+#### 1. SQLite (Default Zero-Config):
+```ini
+DB_TYPE=sqlite
+SQLITE_PATH=bot_database.sqlite3
+```
+
+#### 2. PostgreSQL (High Concurrency):
+```ini
+DATABASE_URL=postgresql://user:password@localhost:5432/telecore_bot
+```
+*TeleCore automatically provisions connection pools via `asyncpg` with a 5-20 connection pool.*
+
+#### 3. MySQL / MariaDB:
+```ini
+DATABASE_URL=mysql://user:password@localhost:3306/telecore_bot
+```
+*Powered by `aiomysql` with DictCursor mapping.*
+
+#### 4. MongoDB (Document Database):
+```ini
+DATABASE_URL=mongodb://localhost:27017/telecore_bot
+# Or MongoDB Atlas:
+# DATABASE_URL=mongodb+srv://user:pass@cluster0.mongodb.net/telecore_bot
+```
+*Powered by `motor` async driver with auto-indexing on `user_id`.*
+
+---
+
+### Developer CLI & Module Generator
+
+TeleCore features an artisan-style code generator to scaffold new feature modules in seconds:
+
+```bash
+python -m app.cli make:module shop
+```
+
+This immediately creates:
+```text
+app/modules/shop/
+├── __init__.py        # Clean router export
+├── handlers.py        # Pre-wired command entrypoint
+├── keyboards.py       # Inline/reply keyboards
+├── services.py        # Isolated business logic class
+├── schemas.py         # Pydantic data models
+└── config.py          # Feature flag dataclass
+```
+
+#### Seed Demo Data:
+```bash
+python -m app.cli db:seed
+```
+
+#### Developer Workflow (`Makefile`):
+
+```bash
+make dev           # Start bot in development mode
+make test          # Execute automated test suite (17 tests)
+make seed          # Seed database with superadmin accounts
+make module name=x # Scaffold a new module
+make docker-up     # Launch Docker Compose stack
+make docker-down   # Stop containers
+make clean         # Purge cached bytecode
 ```
 
 ---
 
 ### Docker Deployment
 
-To launch the bot and Redis stack as background containers:
+To launch TeleCore and Redis as isolated background containers:
 
 ```bash
 docker compose up -d --build
 ```
 
-Monitor live container logs:
+View live container logs:
 
 ```bash
 docker compose logs -f telecore-bot
@@ -198,8 +298,9 @@ docker compose logs -f telecore-bot
 | `/plans` | Subscriptions | Public | View available subscription plans (Free, Pro, VIP). |
 | `/ref` | Referrals | Public | Returns user's unique referral link and reward points. |
 | `/app` | MiniApp | Public | Sends inline launcher for configured Telegram WebApp. |
-| `/ask <query>` | AI | Public | Queries the integrated AI assistant module. |
+| `/ask <query>` | AI | Public | Queries the integrated multi-provider AI assistant. |
 | `/clear_ai` | AI | Public | Resets conversation memory buffer for current user. |
+| `/ai_model` | AI | Public | Displays active AI provider, model, and memory size. |
 | `/panel` | Admin | Admin Only | Opens the interactive real-time control dashboard with inline toggles. |
 | `/stats` | Admin | Admin Only | Returns total registered users, active counts, and event metrics. |
 | `/broadcast [flags]` | Broadcast | Admin Only | High-speed mass announcement (`-copy`, `-pin`, `-silent`, `-fast`). |
@@ -220,46 +321,50 @@ docker compose logs -f telecore-bot
 
 ---
 
-### Developer CLI & Module Generator
+### Production Deployment & Hardening
 
-TeleCore includes a built-in CLI for rapid feature scaffolding and database operations:
-
-```bash
-# Scaffold a brand new feature module in seconds:
-python -m app.cli make:module shop
-
-# This generates:
-# app/modules/shop/
-# ├── __init__.py
-# ├── handlers.py
-# ├── keyboards.py
-# ├── services.py
-# ├── schemas.py
-# └── config.py
-
-# Seed initial superadmin accounts and defaults:
-python -m app.cli db:seed
+#### 1. Webhook Mode with Nginx Reverse Proxy
+In `.env`:
+```ini
+WEBHOOK_ENABLED=true
+WEBHOOK_HOST=127.0.0.1
+WEBHOOK_PORT=8080
+WEBHOOK_URL=https://your-domain.com/webhook
 ```
 
-#### Developer Shortcuts (`Makefile`):
+Nginx configuration snippet:
+```nginx
+server {
+    server_name your-domain.com;
 
-```bash
-make dev           # Start bot in development mode
-make test          # Execute automated test suite
-make seed          # Seed database with superadmin accounts
-make module name=x # Scaffold a new module
-make docker-up     # Launch Docker Compose stack
-make docker-down   # Stop containers
+    location /webhook {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
 ```
 
+#### 2. Systemd Service Setup
+Copy the included service file:
+```bash
+sudo cp telecore.service /etc/systemd/system/telecore.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now telecore
+```
 
-
+#### 3. Environment Security Audit
+Audit your environment file against secret leaks and unsynced parameters:
+```bash
+npx @bipinone/envshield check
+```
 
 ---
 
-### Running Tests
+### Running Automated Tests
 
-Execute the automated test suite:
+TeleCore includes a comprehensive, asynchronous test suite covering database adapters, caching, middlewares, i18n, and CLI generation:
 
 ```bash
 python -m unittest discover tests
