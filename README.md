@@ -151,9 +151,12 @@ tg-bot-boilerplate/
 │   └── main.py                # Dispatcher assembly and runner
 │
 ├── scripts/
-│   └── setup.sh               # One-command automated onboarding script
+│   ├── setup.sh               # Self-healing automated setup for Linux, macOS, WSL & Termux
+│   ├── setup.py               # Universal cross-platform setup engine (Any OS)
+│   ├── setup.ps1              # Native automated PowerShell setup for Windows
+│   └── telecore.service       # Production systemd daemon unit template
 ├── tests/
-│   └── test_framework.py      # Automated unit test suite (17 test cases)
+│   └── test_framework.py      # Automated unit test suite (18 test cases)
 ├── docker-compose.yml         # Container orchestration (App + Redis)
 ├── Dockerfile                 # Multi-stage production container
 ├── Makefile                   # Developer workflow shortcuts
@@ -165,14 +168,38 @@ tg-bot-boilerplate/
 
 ### Quick Start
 
-#### Method A: One-Command Automated Setup
+#### Method A: One-Command Automated Setup (All Operating Systems)
 
+TeleCore includes an **intelligent, self-healing setup engine** that automatically detects your Operating System, auto-installs missing system tools, auto-remedies missing `python3-venv` packages, validates Python 3.10+, and configures your `.env` interactively.
+
+##### 🐧 Linux / 🍎 macOS / 🤖 Android Termux / 🪟 WSL:
 ```bash
 git clone https://github.com/bipinone/tg-bot-boilerplate.git
 cd tg-bot-boilerplate
 chmod +x scripts/setup.sh
 ./scripts/setup.sh
 ```
+
+##### 🪟 Windows (PowerShell):
+```powershell
+git clone https://github.com/bipinone/tg-bot-boilerplate.git
+cd tg-bot-boilerplate
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\setup.ps1
+```
+
+##### 🌐 Universal Runner (Any OS with Python installed):
+```bash
+python scripts/setup.py   # Or: python3 scripts/setup.py
+```
+
+> [!TIP]
+> **Self-Healing & Auto-Fix Capabilities:**
+> - **Debian / Ubuntu `python3-venv` Fix:** Automatically detects and resolves the common `ensurepip is not available` / `python3-venv` error via `apt-get` or fallback virtualenv bootstrap.
+> - **Package Manager Auto-Detection:** Automatically invokes `apt`, `dnf`, `yum`, `pacman`, `apk`, `zypper`, `pkg` (Termux), or `brew` (macOS) if Python or build tools are missing.
+> - **Build Tools & Wheel Auto-Repair:** If C-extension wheels fail to compile, automatically installs development headers or safely falls back to pure-asyncio core drivers so the bot works out of the box.
+> - **Interactive Bot Token Validation:** Securely prompts for `BOT_TOKEN` from [@BotFather](https://t.me/BotFather), validates syntax, and injects it into `.env`.
+> - **Pre-Flight Health Verification:** Performs instant dry-run import verification before concluding.
 
 #### Method B: Manual Virtual Environment
 
