@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tg-bot-boilerplate"
+version = "2.0.0"
+description = "Production-grade, modular Telegram Bot Starter Kit & Framework built on Python and aiogram 3.x"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Bipin One", email = "dev@bipinone.com" }
+]
+keywords = [
+    "telegram",
+    "telegram-bot",
+    "aiogram",
+    "aiogram3",
+    "bot-framework",
+    "boilerplate",
+    "starter-kit",
+    "asyncio",
+    "python",
+    "miniapps"
+]
+dependencies = [
+    "aiogram>=3.13.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "aiosqlite>=0.20.0",
+    "python-dotenv>=1.0.1",
+    "aiohttp>=3.9.5"
+]
+
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.29.0",
+    "SQLAlchemy>=2.0.30",
+    "alembic>=1.13.1"
+]
+redis = [
+    "redis>=5.0.4"
+]
+ai = [
+    "openai>=1.30.0"
+]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.4.0",
+    "ruff>=0.4.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/bipinone/tg-bot-boilerplate"
+Repository = "https://github.com/bipinone/tg-bot-boilerplate.git"
+Issues = "https://github.com/bipinone/tg-bot-boilerplate/issues"

@@ -1,9 +1,23 @@
 services:
   telecore-bot:
     build: .
-    container_name: telecore-telegram-bot
+    container_name: telecore-bot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - ./data:/app/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: telecore-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
