@@ -65,13 +65,76 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
 
     async def test_ban_and_active_user_list(self):
         await self.db.upsert_user(user_id=3003, username="spammer", first_name="Spam")
-        await self.db.set_ban(user_id=3003, is_banned=True)
+        await self.db.set_ban(user_id=3003, is_banned=True, reason="Spamming links")
 
         user = await self.db.get_user(3003)
         self.assertEqual(user["is_banned"], 1)
+        self.assertEqual(user["ban_reason"], "Spamming links")
+        self.assertTrue(await self.db.is_user_banned(3003))
 
         active_users = await self.db.get_all_active_user_ids()
         self.assertNotIn(3003, active_users)
+
+        # Unban test
+        await self.db.set_ban(user_id=3003, is_banned=False)
+        self.assertFalse(await self.db.is_user_banned(3003))
+
+    async def test_dynamic_system_settings(self):
+        # 1. Default fallback
+        val = await self.db.get_setting("custom_key", "default_val")
+        self.assertEqual(val, "default_val")
+
+        # 2. Insert dynamic setting
+        await self.db.set_setting("force_sub_enabled", "true")
+        await self.db.set_setting("force_sub_channel", "@mychannel")
+
+        # 3. Retrieve
+        self.assertEqual(await self.db.get_setting("force_sub_enabled"), "true")
+        self.assertEqual(await self.db.get_setting("force_sub_channel"), "@mychannel")
+
+        # 4. Upsert/Update existing setting
+        await self.db.set_setting("force_sub_enabled", "false")
+        self.assertEqual(await self.db.get_setting("force_sub_enabled"), "false")
+
+        # 5. Get all settings
+        all_s = await self.db.get_all_settings()
+        self.assertIn("force_sub_enabled", all_s)
+        self.assertIn("force_sub_channel", all_s)
+
+    async def test_rbac_roles_and_filters(self):
+        from app.bot.filters.admin import IsAdminFilter, IsOwnerFilter
+        from unittest.mock import MagicMock
+
+        # Create normal user
+        await self.db.upsert_user(user_id=5001, username="normal", first_name="Norm")
+        self.assertEqual(await self.db.get_user_role(5001), "user")
+
+        # Promote to Moderator, then Admin, then Owner
+        await self.db.set_user_role(5001, "moderator")
+        self.assertEqual(await self.db.get_user_role(5001), "moderator")
+
+        await self.db.set_user_role(5001, "admin")
+        self.assertEqual(await self.db.get_user_role(5001), "admin")
+
+        staff = await self.db.get_staff_users()
+        self.assertEqual(len(staff), 1)
+        self.assertEqual(staff[0]["user_id"], 5001)
+
+        # Test IsAdminFilter with DB
+        admin_filter = IsAdminFilter()
+        owner_filter = IsOwnerFilter()
+
+        event_mock = MagicMock()
+        event_mock.from_user.id = 5001
+
+        # Role is 'admin' -> IsAdminFilter True, IsOwnerFilter False
+        self.assertTrue(await admin_filter(event_mock, db=self.db))
+        self.assertFalse(await owner_filter(event_mock, db=self.db))
+
+        # Promote to 'owner' -> Both True
+        await self.db.set_user_role(5001, "owner")
+        self.assertTrue(await admin_filter(event_mock, db=self.db))
+        self.assertTrue(await owner_filter(event_mock, db=self.db))
 
     async def test_telegram_log_service(self):
         from unittest.mock import AsyncMock, MagicMock
@@ -128,5 +191,60 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         server = HealthServer(self.db)
         self.assertIsNotNone(server.app)
 
+    async def test_ban_check_middleware(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.bot.middlewares.ban import BanCheckMiddleware
+
+        from aiogram.types import Message
+        middleware = BanCheckMiddleware()
+        mock_handler = AsyncMock(return_value="handler_reached")
+
+        # 1. Normal active user should reach handler
+        await self.db.upsert_user(user_id=6001, username="clean_user", first_name="Clean")
+        clean_event = MagicMock(spec=Message)
+        mock_user = MagicMock()
+        mock_user.id = 6001
+        mock_user.is_bot = False
+        clean_event.from_user = mock_user
+        clean_event.reply = AsyncMock()
+
+
+        res = await middleware(mock_handler, clean_event, {"db": self.db})
+        self.assertEqual(res, "handler_reached")
+
+        # 2. Banned user should be blocked from reaching handler
+        await self.db.set_ban(6001, is_banned=True, reason="Abuse detected")
+        clean_event.reply.reset_mock()
+        mock_handler.reset_mock()
+
+        blocked_res = await middleware(mock_handler, clean_event, {"db": self.db})
+        self.assertIsNone(blocked_res)
+        mock_handler.assert_not_called()
+        self.assertTrue(clean_event.reply.called)
+        self.assertIn("Abuse detected", clean_event.reply.call_args[0][0])
+
+        # 3. Maintenance mode check
+        await self.db.set_ban(6001, is_banned=False)
+        await self.db.set_setting("maintenance_mode", "true")
+        mock_handler.reset_mock()
+        clean_event.reply.reset_mock()
+
+        maint_res = await middleware(mock_handler, clean_event, {"db": self.db})
+        self.assertIsNone(maint_res)
+        mock_handler.assert_not_called()
+        self.assertTrue(clean_event.reply.called)
+        self.assertIn("Maintenance Mode", clean_event.reply.call_args[0][0])
+
+        # 4. Staff bypasses maintenance mode
+        await self.db.set_user_role(6001, "admin")
+        mock_handler.reset_mock()
+
+        staff_res = await middleware(mock_handler, clean_event, {"db": self.db})
+        self.assertEqual(staff_res, "handler_reached")
+        mock_handler.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
+
+

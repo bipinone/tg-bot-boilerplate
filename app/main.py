@@ -12,6 +12,7 @@ from app.database.session import DatabaseSession
 from app.services.logger import TelegramLogService
 from app.services.health import HealthServer
 from app.bot.middlewares.rate_limit import RateLimitMiddleware
+from app.bot.middlewares.ban import BanCheckMiddleware
 from app.bot.handlers.common import router as common_router
 
 # Feature module routers
@@ -55,10 +56,12 @@ def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dis
     # Global Rate Limiting
     dp.message.middleware(RateLimitMiddleware(limit_seconds=config.bot.rate_limit))
 
-    # Optional Force Subscription Middleware
-    if config.modules.force_sub:
-        logger.info("Module ENABLED: Force Subscription")
-        dp.message.middleware(ForceSubMiddleware())
+    # Global Ban & Maintenance Enforcement
+    dp.message.middleware(BanCheckMiddleware())
+    dp.callback_query.middleware(BanCheckMiddleware())
+
+    # Dynamic Force Subscription Middleware (Always wired, checks dynamic DB status)
+    dp.message.middleware(ForceSubMiddleware())
 
     # Common router (always active)
     dp.include_router(common_router)

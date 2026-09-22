@@ -12,7 +12,7 @@ class DatabaseSession:
     async def init_models(self):
         """Initializes database schema."""
         async with aiosqlite.connect(self.db_path) as db:
-            # Users table with forum topic_id support
+            # Users table with role and ban_reason support
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -23,17 +23,24 @@ class DatabaseSession:
                     referrer_id INTEGER,
                     points INTEGER DEFAULT 0,
                     topic_id INTEGER,
+                    role TEXT DEFAULT 'user',
                     is_banned BOOLEAN DEFAULT 0,
+                    ban_reason TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # Auto-migrate if topic_id is missing in existing database
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN topic_id INTEGER")
-            except Exception:
-                pass
+            # Auto-migrations for backwards compatibility
+            for col, col_type in [
+                ("topic_id", "INTEGER"),
+                ("role", "TEXT DEFAULT 'user'"),
+                ("ban_reason", "TEXT")
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
 
             # Analytics events table
             await db.execute("""
@@ -42,6 +49,15 @@ class DatabaseSession:
                     user_id INTEGER,
                     event_name TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Dynamic System Settings table (overrides .env in real-time)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -100,11 +116,21 @@ class DatabaseSession:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
 
-    async def set_ban(self, user_id: int, is_banned: bool = True) -> bool:
+    async def set_ban(self, user_id: int, is_banned: bool = True, reason: Optional[str] = None) -> bool:
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("UPDATE users SET is_banned = ? WHERE user_id = ?", (1 if is_banned else 0, user_id))
+            cursor = await db.execute(
+                "UPDATE users SET is_banned = ?, ban_reason = ? WHERE user_id = ?",
+                (1 if is_banned else 0, reason if is_banned else None, user_id)
+            )
             await db.commit()
             return cursor.rowcount > 0
+
+    async def is_user_banned(self, user_id: int) -> bool:
+        """Checks if a user is actively banned."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT is_banned FROM users WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+                return bool(row[0]) if row else False
 
     async def log_event(self, user_id: int, event_name: str):
         async with aiosqlite.connect(self.db_path) as db:
@@ -156,3 +182,52 @@ class DatabaseSession:
             async with db.execute("SELECT * FROM users WHERE topic_id = ?", (topic_id,)) as cur:
                 row = await cur.fetchone()
                 return dict(row) if row else None
+
+    # --- Role-Based Access Control (RBAC) ---
+    async def set_user_role(self, user_id: int, role: str) -> bool:
+        """Sets user role: 'owner', 'admin', 'moderator', or 'user'."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("UPDATE users SET role = ? WHERE user_id = ?", (role.lower(), user_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_user_role(self, user_id: int) -> str:
+        """Returns the role of a user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT role FROM users WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row and row[0] else "user"
+
+    async def get_staff_users(self) -> List[Dict[str, Any]]:
+        """Lists all owners, admins, and moderators."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, username, first_name, role FROM users WHERE role IN ('owner', 'admin', 'moderator')") as cur:
+                rows = await cur.fetchall()
+                return [dict(r) for r in rows]
+
+    # --- Dynamic In-Bot System Settings (Overrides .env) ---
+    async def set_setting(self, key: str, value: str) -> None:
+        """Sets or updates a dynamic system setting."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """, (key, str(value), now))
+            await db.commit()
+
+    async def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Gets a dynamic system setting value, falling back to default."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT value FROM system_settings WHERE key = ?", (key,)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row and row[0] is not None else default
+
+    async def get_all_settings(self) -> Dict[str, str]:
+        """Retrieves all stored dynamic system settings."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT key, value FROM system_settings") as cur:
+                rows = await cur.fetchall()
+                return {r[0]: r[1] for r in rows}
