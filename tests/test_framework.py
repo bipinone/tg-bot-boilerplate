@@ -345,9 +345,99 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         self.assertIn("paused", broadcast_state)
         self.assertIn("cancelled", broadcast_state)
 
+    def test_i18n_service(self):
+        from app.modules.i18n.service import i18n
+
+        # 1. English
+        en_text = i18n.t("ping", lang="en", latency=45)
+        self.assertIn("45ms", en_text)
+        self.assertIn("Pong!", en_text)
+
+        # 2. Hindi
+        hi_text = i18n.t("ping", lang="hi", latency=45)
+        self.assertIn("पोंग!", hi_text)
+
+        # 3. Missing key fallback
+        unknown = i18n.t("non_existent_key", lang="hi")
+        self.assertEqual(unknown, "non_existent_key")
+
+    async def test_group_management(self):
+        # 1. Register group
+        is_new = await self.db.upsert_group(chat_id=-100999888, title="Test Community", chat_type="supergroup")
+        self.assertTrue(is_new)
+
+        # 2. Fetch group
+        grp = await self.db.get_group(-100999888)
+        self.assertIsNotNone(grp)
+        self.assertEqual(grp["title"], "Test Community")
+
+        # 3. Active group list
+        active_groups = await self.db.get_all_active_group_ids()
+        self.assertIn(-100999888, active_groups)
+
+        # 4. Group settings
+        await self.db.set_group_setting(-100999888, "welcome_msg", "Hello world")
+        val = await self.db.get_group_setting(-100999888, "welcome_msg")
+        self.assertEqual(val, "Hello world")
+
+    async def test_subscriptions_and_entitlements(self):
+        await self.db.upsert_user(user_id=9001, username="sub_user", first_name="Subber")
+
+        # 1. Initially no active subscription
+        self.assertFalse(await self.db.is_subscription_active(9001))
+
+        # 2. Create 30-day Pro subscription
+        sub = await self.db.create_subscription(user_id=9001, plan="pro", duration_days=30)
+        self.assertEqual(sub["plan"], "pro")
+        self.assertTrue(sub["is_active"])
+
+        # 3. Verify active status
+        self.assertTrue(await self.db.is_subscription_active(9001))
+        fetched_sub = await self.db.get_user_subscription(9001)
+        self.assertIsNotNone(fetched_sub)
+        self.assertEqual(fetched_sub["plan"], "pro")
+
+    async def test_task_scheduler(self):
+        from unittest.mock import MagicMock, AsyncMock
+        from app.modules.scheduler.service import TaskScheduler
+
+        mock_bot = MagicMock()
+        scheduler = TaskScheduler(mock_bot, self.db)
+        dummy_task = AsyncMock()
+
+        scheduler.add_job("test_job", dummy_task, interval_seconds=0.1)
+        await scheduler.start()
+        self.assertTrue(scheduler._running)
+        await asyncio.sleep(0.15)
+        self.assertTrue(dummy_task.called)
+        await scheduler.stop()
+        self.assertFalse(scheduler._running)
+
+    def test_cli_make_module(self):
+        import shutil
+        from pathlib import Path
+        from app.cli import make_module
+
+        test_module_name = "test_temp_mod"
+        module_path = Path("app/modules") / test_module_name
+
+        try:
+            make_module(test_module_name)
+            self.assertTrue(module_path.exists())
+            self.assertTrue((module_path / "__init__.py").exists())
+            self.assertTrue((module_path / "handlers.py").exists())
+            self.assertTrue((module_path / "services.py").exists())
+            self.assertTrue((module_path / "keyboards.py").exists())
+            self.assertTrue((module_path / "schemas.py").exists())
+            self.assertTrue((module_path / "config.py").exists())
+        finally:
+            if module_path.exists():
+                shutil.rmtree(module_path)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

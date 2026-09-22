@@ -2,7 +2,7 @@
 
 # TeleCore
 
-**An enterprise-grade, modular Telegram Bot Framework and Starter Kit built with Python and aiogram 3.x.**
+**A production-ready, modular Telegram Bot Framework & Starter Kit built with Python and aiogram 3.x.**
 
 <br />
 
@@ -26,7 +26,7 @@
 
 Most Telegram bot starters provide only a basic `/start` handler, forcing developers to rebuild user persistence, rate limiting, administrative tools, and broadcast engines repeatedly for every new project.
 
-**TeleCore** is a modular, feature-flagged architecture designed to serve as the immediate base for any Telegram bot project — whether you are building an AI assistant, an SMM panel, a subscription SaaS, a community bot, or a Telegram Mini App.
+**TeleCore** is a modular, feature-flagged architecture designed to serve as the immediate base for any Telegram bot project — whether you are building an AI assistant, a community manager, a subscription SaaS, a referral campaign, or a Telegram Mini App.
 
 ---
 
@@ -34,13 +34,18 @@ Most Telegram bot starters provide only a basic `/start` handler, forcing develo
 
 - **Async Core & Blazing Speed**: Built on Python 3.10+ and `aiogram 3.x` with native `uvloop` C-based event loops, `orjson` serialization, and sub-millisecond in-memory TTL caching.
 - **Multi-Database Provider (Pluggable DAL)**: Native async driver support for **SQLite** (`aiosqlite`), **PostgreSQL** (`asyncpg`), **MySQL/MariaDB** (`aiomysql`), and **MongoDB** (`motor`). Switch engines simply by setting `DB_TYPE` or `DATABASE_URL`!
+- **Internationalization (i18n)**: Seamless multi-language support (English, Hindi) with per-user language preference and `/language` selector.
+- **Subscriptions & Entitlements**: Decoupled SaaS membership engine (Free, Pro, VIP tiers) with expiry tracking and access gates.
+- **Community & Group Engine**: Group event listeners, supergroup forum topic handling, and group-level settings.
+- **Background Task Scheduler**: Async recurring job scheduler for daily routines, subscription expiry notifications, and database cleanup.
+- **Flag-Based Mass Broadcast**: High-speed broadcast engine supporting flags (`-copy`, `-pin`, `-silent`, `-fast`), live visual progress bars, and pause/resume/cancel controls.
+- **AI Engine**: Multi-provider LLM support (OpenAI, Gemini, Anthropic, Custom endpoints) with per-user conversation memory.
 - **Dual Runtime Modes**: Supports both local **Long Polling** and production **Webhooks** via `aiohttp`.
-- **Feature-Flagged Modules**: Enable or disable features directly via `.env` flags without editing core application code.
 - **Anti-Flood & Global Security**: Sliding window rate limiter, ban enforcement with reasons, and maintenance mode filters.
 - **Telegram Group & Forum Topic Logging**: Real-time alerts for bot startups, new user registrations, and unhandled errors routed to standard channels or specific Supergroup Forum Topics (`message_thread_id`).
 - **In-Bot Control Panel**: Dynamic `/panel` for instant setting toggles without restarting containers.
+- **Module Generator CLI**: Scaffold clean feature modules with a single command (`python -m app.cli make:module <name>`).
 - **Docker Compose Stack**: Containerized deployment with optional Redis caching service.
-
 
 ---
 
@@ -48,18 +53,22 @@ Most Telegram bot starters provide only a basic `/start` handler, forcing develo
 
 TeleCore features an isolated, modular architecture where features can be toggled via environment variables:
 
-| Module | Flag | Description |
+| Module | Location | Description |
 | :--- | :--- | :--- |
-| **Admin** | `ENABLE_MODULE_ADMIN=true` | System analytics (`/stats`), access controls (`/ban`, `/unban`), and moderation filters. |
-| **Broadcast** | `ENABLE_MODULE_BROADCAST=true` | Safe mass announcements with progress tracking, sleep throttling, and error handling. |
-| **Force Subscription** | `ENABLE_MODULE_FORCE_SUB=true` | Middleware enforcing channel/chat membership before granting bot access. |
-| **Referrals** | `ENABLE_MODULE_REFERRALS=true` | Deep-link invitation engine (`/start ref_123`), referral counters, and reward points. |
-| **Telegram Mini Apps** | `ENABLE_MODULE_MINIAPP=true` | Native WebApp integration buttons and handlers. |
-| **AI Assistant** | `ENABLE_MODULE_AI=true` | Pluggable streaming endpoint for OpenAI and Google Gemini LLM queries. |
-| **Live Support Chat** | `ENABLE_TOPIC_SUPPORT_CHAT=true` | Two-way relay: user DMs forwarded to personal forum topics; admin replies in topic sent back to user. |
-| **Health & Metrics** | `HEALTH_SERVER_ENABLED=true` | Built-in HTTP server (`/health`, `/metrics`) on port 8080 preventing cloud sleeping on Render/Railway/VPS. |
-| **Payments** | `ENABLE_MODULE_PAYMENTS=true` | Digital goods invoices and Telegram Stars (`XTR`) checkout handlers. |
-| **Analytics** | `ENABLE_MODULE_ANALYTICS=true` | Event logging and active user telemetry. |
+| **i18n** | `modules/i18n/` | Multi-language localization (English, Hindi) with `/language` selection. |
+| **Subscriptions** | `modules/subscriptions/` | SaaS plan tiers (Pro/VIP), expiry warnings, and entitlement verification. |
+| **Groups** | `modules/groups/` | Community management, group tracking, and supergroup settings. |
+| **Scheduler** | `modules/scheduler/` | Async background job runner for maintenance and subscription reminders. |
+| **Admin** | `modules/admin/` | Analytics (`/stats`), RBAC (`/setrole`), moderation (`/ban`, `/unban`), `/panel`. |
+| **Broadcast** | `modules/broadcast/` | Flag-based mass announcement engine (`-copy`, `-pin`, `-silent`, `-fast`). |
+| **AI Assistant** | `modules/ai/` | OpenAI, Gemini, Anthropic & Custom LLM engine with conversation memory. |
+| **Force Subscription** | `modules/force_sub/` | Channel membership gatekeeper with real-time in-bot settings. |
+| **Referrals** | `modules/referrals/` | Deep-link invitation engine (`/start ref_123`), referral counters, points. |
+| **Telegram Mini Apps** | `modules/miniapp/` | Native WebApp integration buttons and handlers. |
+| **Live Support Chat** | `modules/support/` | Two-way relay: user DMs forwarded to personal forum topics; admin replies sent back. |
+| **Health & Metrics** | `services/health.py` | Embedded HTTP server (`/health`, `/metrics`) preventing cloud sleeping. |
+| **Payments** | `modules/payments/` | Digital goods checkout and Telegram Stars (`XTR`) handlers. |
+
 
 ---
 
@@ -184,15 +193,21 @@ docker compose logs -f telecore-bot
 | `/start` | Core | Public | Launches bot menu and parses deep-link referral parameters. |
 | `/help` | Core | Public | Displays available command manual and navigation. |
 | `/ping` | Core | Public | Returns latency between server and Telegram API. |
+| `/language` | i18n | Public | Interactive multi-language picker (English, Hindi). |
+| `/sub` | Subscriptions | Public | Check current subscription tier, expiry date, and status. |
+| `/plans` | Subscriptions | Public | View available subscription plans (Free, Pro, VIP). |
 | `/ref` | Referrals | Public | Returns user's unique referral link and reward points. |
 | `/app` | MiniApp | Public | Sends inline launcher for configured Telegram WebApp. |
 | `/ask <query>` | AI | Public | Queries the integrated AI assistant module. |
+| `/clear_ai` | AI | Public | Resets conversation memory buffer for current user. |
 | `/panel` | Admin | Admin Only | Opens the interactive real-time control dashboard with inline toggles. |
 | `/stats` | Admin | Admin Only | Returns total registered users, active counts, and event metrics. |
 | `/broadcast [flags]` | Broadcast | Admin Only | High-speed mass announcement (`-copy`, `-pin`, `-silent`, `-fast`). |
 | `/broadcast_pause` | Broadcast | Admin Only | Pauses an active mass broadcast in real time. |
 | `/broadcast_resume` | Broadcast | Admin Only | Resumes a paused mass broadcast. |
 | `/broadcast_cancel` | Broadcast | Admin Only | Terminates active broadcast and cancels pending tasks. |
+| `/groups` | Groups | Admin Only | Lists all registered active community groups and supergroups. |
+| `/grant_sub <id> <plan>` | Admin | Admin Only | Manually grants/extends Pro or VIP membership. |
 | `/ban <user_id> [reason]` | Admin | Admin Only | Revokes bot access with reason, notifying the target user. |
 | `/unban <user_id>` | Admin | Admin Only | Restores bot access for a previously banned user. |
 | `/user <user_id>` | Admin | Admin Only | Inspects user profile, RBAC role, points, and ban history. |
@@ -202,6 +217,41 @@ docker compose logs -f telecore-bot
 | `/set_channel_url <url>` | Admin | Admin Only | Updates the custom invite link for Force-Subscription. |
 | `/maintenance <on\|off>` | Admin | Admin Only | Toggles maintenance mode (allows staff access while pausing public users). |
 | `/export` | Admin | Admin Only | Exports all registered users into a downloadable CSV spreadsheet. |
+
+---
+
+### Developer CLI & Module Generator
+
+TeleCore includes a built-in CLI for rapid feature scaffolding and database operations:
+
+```bash
+# Scaffold a brand new feature module in seconds:
+python -m app.cli make:module shop
+
+# This generates:
+# app/modules/shop/
+# ├── __init__.py
+# ├── handlers.py
+# ├── keyboards.py
+# ├── services.py
+# ├── schemas.py
+# └── config.py
+
+# Seed initial superadmin accounts and defaults:
+python -m app.cli db:seed
+```
+
+#### Developer Shortcuts (`Makefile`):
+
+```bash
+make dev           # Start bot in development mode
+make test          # Execute automated test suite
+make seed          # Seed database with superadmin accounts
+make module name=x # Scaffold a new module
+make docker-up     # Launch Docker Compose stack
+make docker-down   # Stop containers
+```
+
 
 
 

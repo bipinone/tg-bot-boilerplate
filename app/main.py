@@ -13,6 +13,7 @@ from app.services.logger import TelegramLogService
 from app.services.health import HealthServer
 from app.bot.middlewares.rate_limit import RateLimitMiddleware
 from app.bot.middlewares.ban import BanCheckMiddleware
+from app.modules.i18n.middleware import I18nMiddleware
 from app.bot.handlers.common import router as common_router
 
 # Feature module routers
@@ -24,6 +25,10 @@ from app.modules.miniapp.router import router as miniapp_router
 from app.modules.payments.router import router as payments_router
 from app.modules.support.router import router as support_router
 from app.modules.force_sub.middleware import ForceSubMiddleware
+from app.modules.i18n.router import router as i18n_router
+from app.modules.groups.router import router as groups_router
+from app.modules.subscriptions.router import router as subscriptions_router
+from app.modules.scheduler.service import TaskScheduler
 
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
@@ -33,7 +38,7 @@ logger = logging.getLogger("TeleCore")
 
 def get_active_module_names() -> list:
     """Returns list of currently active feature flags."""
-    active = []
+    active = ["I18n", "Groups", "Subscriptions"]
     if config.modules.admin: active.append("Admin")
     if config.modules.broadcast: active.append("Broadcast")
     if config.modules.force_sub: active.append("ForceSub")
@@ -60,11 +65,18 @@ def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dis
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
 
+    # Multi-Language I18n Middleware
+    dp.message.middleware(I18nMiddleware())
+    dp.callback_query.middleware(I18nMiddleware())
+
     # Dynamic Force Subscription Middleware (Always wired, checks dynamic DB status)
     dp.message.middleware(ForceSubMiddleware())
 
     # Common router (always active)
     dp.include_router(common_router)
+    dp.include_router(i18n_router)
+    dp.include_router(groups_router)
+    dp.include_router(subscriptions_router)
 
     # Pluggable Feature Modules
     if config.modules.admin:
@@ -104,6 +116,7 @@ def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dis
         await tg_logger.log_error(str(event.exception), user_id=user_id, command=cmd)
 
     return dp
+
 
 async def run_polling(bot: Bot, dp: Dispatcher, db: DatabaseSession, tg_logger: TelegramLogService):
     """Starts polling loop."""
@@ -158,15 +171,21 @@ async def main():
     health_server = HealthServer(db)
     await health_server.start()
 
+    # Start Background Task Scheduler (cron & recurring maintenance)
+    scheduler = TaskScheduler(bot, db)
+    await scheduler.start()
+
     try:
         if config.webhook.enabled:
             await run_webhook(bot, dp, db, tg_logger)
         else:
             await run_polling(bot, dp, db, tg_logger)
     finally:
+        await scheduler.stop()
         await health_server.stop()
         await db.close()
         await bot.session.close()
+
 
 if __name__ == "__main__":
     # Activate ultra-fast C-based event loop on Linux/macOS

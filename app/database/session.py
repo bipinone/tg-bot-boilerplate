@@ -186,7 +186,82 @@ class DatabaseSession:
     async def get_all_settings(self) -> Dict[str, str]:
         return await self.adapter.get_all_settings()
 
+    async def set_user_language(self, user_id: int, language_code: str) -> bool:
+        self.cache.delete(f"user:{user_id}")
+        return await self.adapter.set_user_language(user_id, language_code)
+
+    async def update_user_activity(
+        self,
+        user_id: int,
+        username: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        self.cache.delete(f"user:{user_id}")
+        return await self.adapter.update_user_activity(user_id, username, first_name, last_name)
+
+    # --- Group / Chat Management ---
+
+    async def upsert_group(
+        self,
+        chat_id: int,
+        title: str,
+        chat_type: str = "supergroup",
+        is_active: bool = True
+    ) -> bool:
+        self.cache.delete(f"group:{chat_id}")
+        return await self.adapter.upsert_group(chat_id, title, chat_type, is_active)
+
+    async def get_group(self, chat_id: int) -> Optional[Dict[str, Any]]:
+        cache_key = f"group:{chat_id}"
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        grp = await self.adapter.get_group(chat_id)
+        if grp:
+            self.cache.set(cache_key, grp, ttl=60.0)
+        return grp
+
+    async def get_all_active_group_ids(self) -> List[int]:
+        return await self.adapter.get_all_active_group_ids()
+
+    async def set_group_setting(self, chat_id: int, key: str, value: str) -> None:
+        self.cache.delete(f"gsetting:{chat_id}:{key}")
+        await self.adapter.set_group_setting(chat_id, key, value)
+
+    async def get_group_setting(self, chat_id: int, key: str, default: Optional[str] = None) -> Optional[str]:
+        cache_key = f"gsetting:{chat_id}:{key}"
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        val = await self.adapter.get_group_setting(chat_id, key, default)
+        if val is not None:
+            self.cache.set(cache_key, val, ttl=60.0)
+        return val
+
+    # --- Subscriptions & Entitlements ---
+
+    async def create_subscription(self, user_id: int, plan: str, duration_days: int = 30) -> Dict[str, Any]:
+        self.cache.delete(f"sub:{user_id}")
+        return await self.adapter.create_subscription(user_id, plan, duration_days)
+
+    async def get_user_subscription(self, user_id: int) -> Optional[Dict[str, Any]]:
+        return await self.adapter.get_user_subscription(user_id)
+
+    async def is_subscription_active(self, user_id: int) -> bool:
+        cache_key = f"sub:{user_id}"
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        active = await self.adapter.is_subscription_active(user_id)
+        self.cache.set(cache_key, active, ttl=60.0)
+        return active
+
+    async def get_expiring_subscriptions(self, within_days: int = 1) -> List[Dict[str, Any]]:
+        return await self.adapter.get_expiring_subscriptions(within_days)
+
     async def close(self) -> None:
         """Releases database connections and pools."""
         await self.adapter.close()
         self.cache.clear()
+

@@ -1,0 +1,11 @@
+{
+  "welcome": "👋 Welcome to <b>{bot_name}</b>, {name}!\n\nThis is a production-ready, modular Telegram bot framework built on Python and aiogram 3.x.",
+  "help": "📖 <b>Available Commands:</b>\n\n• /start - Launch main menu\n• /language - Change preferred language\n• /ref - Referral link and points\n• /sub - Check subscription plan\n• /ask - AI assistant query\n• /help - Display this manual",
+  "ping": "🏓 <b>Pong!</b> Latency: <code>{latency}ms</code>",
+  "lang_choose": "🌐 <b>Select Your Preferred Language:</b>\n\nPlease choose a language below:",
+  "lang_updated": "✅ Your language preference has been updated to: <b>English 🇬🇧</b>",
+  "access_denied": "⛔ <b>Access Denied:</b> You do not have permission to execute this command.",
+  "banned_notice": "⛔ <b>Account Suspended:</b> {reason}",
+  "maintenance_notice": "🛠️ <b>Maintenance Mode:</b> The bot is currently undergoing scheduled upgrades.",
+  "sub_required": "🔒 <b>Pro Feature:</b> This feature requires an active subscription. Use /sub to upgrade."
+}
