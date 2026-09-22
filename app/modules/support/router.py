@@ -23,19 +23,23 @@ async def relay_user_to_admin_topic(
     When user sends any message in private chat, forward it directly to
     their personal dedicated topic in the admin group.
     """
-    if not config.support.enabled or not config.logging.chat_id:
+    if not config.support.enabled:
+        return
+
+    cfg = await tg_logger.get_effective_config(db=db)
+    if not cfg["enabled"] or not cfg["chat_id"]:
         return
 
     user = message.from_user
-    # Ensure user has a dedicated topic
-    thread_id = await tg_logger.get_or_create_user_topic(user.id, user.first_name, user.username, db)
+    # Ensure user has a dedicated topic (auto-creates if missing)
+    thread_id = await tg_logger.ensure_user_topic(user.id, user.first_name, user.username, db)
     if not thread_id:
         return
 
     try:
         # Copy the user's message directly into their forum topic
         await message.copy_to(
-            chat_id=config.logging.chat_id,
+            chat_id=cfg["chat_id"],
             message_thread_id=thread_id
         )
     except TelegramAPIError as e:
@@ -43,16 +47,20 @@ async def relay_user_to_admin_topic(
 
 # 2. Admin -> User: Reply inside topic and relay back to user
 @router.message(
-    F.chat.id == config.logging.chat_id,
+    F.chat.type.in_({ChatType.SUPERGROUP, ChatType.GROUP}),
     F.message_thread_id != None,
     ~F.text.startswith("/")
 )
-async def relay_admin_topic_to_user(message: Message, bot: Bot, db: DatabaseSession):
+async def relay_admin_topic_to_user(message: Message, bot: Bot, db: DatabaseSession, tg_logger: TelegramLogService):
     """
     When an admin replies inside a user's dedicated forum topic,
     relay that message back to the user's private Telegram chat!
     """
     if not config.support.enabled:
+        return
+
+    cfg = await tg_logger.get_effective_config(db=db)
+    if not cfg["enabled"] or not cfg["chat_id"] or str(message.chat.id) != str(cfg["chat_id"]):
         return
 
     # Ignore bot's own automated messages

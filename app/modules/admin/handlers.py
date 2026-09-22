@@ -95,30 +95,27 @@ async def build_panel_markup(db: DatabaseSession, tg_logger: Optional[TelegramLo
 
 
 async def build_logs_panel_markup(db: DatabaseSession, tg_logger: TelegramLogService) -> tuple[str, InlineKeyboardMarkup]:
-    """Generates the dedicated logs configuration dashboard."""
-    cfg = await tg_logger.get_effective_config()
+    """Generates the dedicated forum topic logs configuration dashboard."""
+    cfg = await tg_logger.get_effective_config(db=db)
     is_enabled = cfg["enabled"] and bool(cfg["chat_id"])
     has_chat = bool(cfg["chat_id"])
-    is_topic = bool(cfg["thread_id"]) or cfg.get("chat_type") == "topic_group"
+
+    stats = await db.get_stats()
+    total_users = stats.get("total_users", 0)
 
     status_icon = "🟢 <b>ACTIVE</b>" if is_enabled else ("🔴 <i>DISABLED</i>" if has_chat else "⚪ <i>NOT CONFIGURED</i>")
     dest_str = f"<code>{cfg['chat_id']}</code>" if has_chat else "<i>None (Not Set)</i>"
-    type_str = "💬 Forum Topic Supergroup" if is_topic else "📢 Standard Channel / Group"
-    topic_str = f"<code>#{cfg['thread_id']}</code>" if cfg["thread_id"] else "<i>Main Chat / None</i>"
-    user_topics_str = "🟢 <b>Enabled</b> (1 Topic Per User)" if cfg["user_topics"] else "⚪ <i>Disabled</i>"
 
     text = (
-        "📑 <b>Telegram Logs Configuration Dashboard</b>\n\n"
+        "📑 <b>Forum Topic Logs Supergroup Dashboard</b>\n\n"
         f"• <b>Logging Status:</b> {status_icon}\n"
-        f"• <b>Target Destination:</b> {dest_str}\n"
-        f"• <b>Destination Type:</b> {type_str}\n"
-        f"• <b>Default Topic/Thread:</b> {topic_str}\n"
-        f"• <b>Auto User Topics:</b> {user_topics_str}\n\n"
-        "<i>Configure your logging channel or forum topic group below:</i>"
+        f"• <b>Logs Supergroup:</b> {dest_str}\n"
+        "• <b>Topic Mode:</b> 💬 <b>1 Dedicated Topic Per User</b> (Always ON 🟢)\n"
+        f"• <b>Total Registered Users:</b> <code>{total_users}</code>\n\n"
+        "<i>Har user ka personal forum topic banega. User activities, messages aur admin live support sab user ke topic me relay hoga!</i>"
     )
 
-    toggle_btn_text = "🔴 Disable Logging" if cfg["enabled"] else "🟢 Enable Logging"
-    user_topics_btn_text = "👤 User Topics: ON 🟢" if cfg["user_topics"] else "👤 User Topics: OFF ⚪"
+    toggle_btn_text = "🔴 Turn Logs OFF" if cfg["enabled"] else "🟢 Turn Logs ON"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -126,15 +123,11 @@ async def build_logs_panel_markup(db: DatabaseSession, tg_logger: TelegramLogSer
             InlineKeyboardButton(text="🧪 Send Test Log", callback_data="admin_action:test_log"),
         ],
         [
-            InlineKeyboardButton(text="📢 Set Normal Channel/Group", callback_data="admin_prompt:log_chat"),
-            InlineKeyboardButton(text="💬 Set Topic Supergroup", callback_data="admin_prompt:log_topic_chat"),
+            InlineKeyboardButton(text="💬 Set Logs Supergroup", callback_data="admin_prompt:log_topic_chat"),
+            InlineKeyboardButton(text="🔄 Sync All User Topics", callback_data="admin_action:sync_topics"),
         ],
         [
-            InlineKeyboardButton(text="📌 Set Topic/Thread ID", callback_data="admin_prompt:log_thread"),
-            InlineKeyboardButton(text=user_topics_btn_text, callback_data="admin_toggle:user_topics"),
-        ],
-        [
-            InlineKeyboardButton(text="🗑️ Reset / Disconnect Logs", callback_data="admin_action:reset_logs"),
+            InlineKeyboardButton(text="🗑️ Disconnect Logs Group", callback_data="admin_action:reset_logs"),
         ],
         [
             InlineKeyboardButton(text="⬅️ Back to Control Panel", callback_data="admin_panel:refresh"),
@@ -206,13 +199,13 @@ async def admin_toggle_callback(callback: CallbackQuery, db: DatabaseSession, tg
 
 @router.callback_query(F.data.startswith("admin_action:"))
 async def admin_action_callback(callback: CallbackQuery, db: DatabaseSession, tg_logger: TelegramLogService):
-    """Handles log actions like testing or resetting."""
+    """Handles log actions like testing, syncing user topics, or resetting."""
     action = callback.data.split(":")[1]
 
     if action == "test_log":
-        cfg = await tg_logger.get_effective_config()
+        cfg = await tg_logger.get_effective_config(db=db)
         if not cfg["chat_id"]:
-            await callback.answer("⚠️ No log destination configured! Please set a channel or group first.", show_alert=True)
+            await callback.answer("⚠️ No log destination configured! Please set a forum supergroup first.", show_alert=True)
             return
 
         await callback.answer("Sending verification test log...")
@@ -221,7 +214,7 @@ async def admin_action_callback(callback: CallbackQuery, db: DatabaseSession, tg
             await callback.message.reply(
                 f"✅ <b>Test Log Delivered Successfully!</b>\n\n"
                 f"• <b>Destination:</b> <code>{cfg['chat_id']}</code>\n"
-                f"• <b>Topic ID:</b> <code>{cfg['thread_id'] or 'None (Main Chat)'}</code>\n"
+                f"• <b>Topic ID:</b> <code>{cfg['thread_id'] or 'None (General)'}</code>\n"
                 f"• <b>Result:</b> {msg}",
                 parse_mode="HTML"
             )
@@ -230,15 +223,34 @@ async def admin_action_callback(callback: CallbackQuery, db: DatabaseSession, tg
                 f"❌ <b>Test Log Delivery Failed</b>\n\n"
                 f"• <b>Destination:</b> <code>{cfg['chat_id']}</code>\n"
                 f"• <b>Error:</b> <code>{msg}</code>\n\n"
-                "<i>Make sure the bot has Administrator permissions in the target channel/group!</i>",
+                "<i>Make sure the bot has Administrator permissions in the forum supergroup!</i>",
                 parse_mode="HTML"
             )
+
+    elif action == "sync_topics":
+        cfg = await tg_logger.get_effective_config(db=db)
+        if not cfg["chat_id"]:
+            await callback.answer("⚠️ No forum log group configured! Click [💬 Set Logs Supergroup] first.", show_alert=True)
+            return
+
+        await callback.answer("🔄 Syncing topics for all database users...")
+        status_msg = await callback.message.reply("⏳ <i>Syncing topics for all database users...</i>", parse_mode="HTML")
+        created, existing, failed = await tg_logger.sync_all_user_topics(db)
+        await status_msg.edit_text(
+            f"🔄 <b>User Topics Synchronization Completed!</b>\n\n"
+            f"• 🆕 <b>New Topics Created:</b> <code>{created}</code>\n"
+            f"• ℹ️ <b>Already Had Topics:</b> <code>{existing}</code>\n"
+            f"• ⚠️ <b>Failed / Skipped:</b> <code>{failed}</code>\n\n"
+            "<i>All active bot users now have their dedicated forum log topic!</i>",
+            parse_mode="HTML"
+        )
 
     elif action == "reset_logs":
         await db.set_setting("log_chat_id", "")
         await db.set_setting("log_thread_id", "")
         await db.set_setting("log_enabled", "false")
-        await callback.answer("Logging destination reset and disabled.", show_alert=True)
+        await db.set_setting("log_user_topics", "false")
+        await callback.answer("Logging destination reset and disconnected.", show_alert=True)
         text, keyboard = await build_logs_panel_markup(db, tg_logger)
         try:
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -254,36 +266,15 @@ async def admin_prompt_callback(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="❌ Cancel", callback_data="admin_panel:logs")]
     ])
 
-    if prompt_type == "log_chat":
+    if prompt_type in ("log_topic_chat", "log_chat"):
         await state.set_state(AdminLogState.waiting_for_chat)
-        await state.update_data(mode="normal")
         await callback.message.edit_text(
-            "📢 <b>Set Normal Channel / Group for Logs</b>\n\n"
-            "Forward any message from your target channel/group, or send its <code>-100...</code> Chat ID or <code>@username</code>:\n\n"
-            "<i>(Make sure the bot is already an Admin in that channel/group)</i>",
-            reply_markup=cancel_kb,
-            parse_mode="HTML"
-        )
-        await callback.answer()
-
-    elif prompt_type == "log_topic_chat":
-        await state.set_state(AdminLogState.waiting_for_chat)
-        await state.update_data(mode="topic")
-        await callback.message.edit_text(
-            "💬 <b>Set Forum Topic Supergroup for Logs</b>\n\n"
-            "Forward a message from your Supergroup (with Topics enabled), or send its <code>-100...</code> Chat ID:\n\n"
-            "<i>(Bot must be an Admin with Manage Topics permission. You will choose a specific Topic next)</i>",
-            reply_markup=cancel_kb,
-            parse_mode="HTML"
-        )
-        await callback.answer()
-
-    elif prompt_type == "log_thread":
-        await state.set_state(AdminLogState.waiting_for_thread)
-        await callback.message.edit_text(
-            "📌 <b>Set Specific Topic / Thread ID</b>\n\n"
-            "Enter the numeric Forum Topic ID (e.g. <code>2</code>, <code>145</code>), or send <code>0</code> / <code>off</code> to log in the General chat:\n\n"
-            "<i>(Tip: In Telegram, right-click/long-press any topic and copy link to see its message_thread_id)</i>",
+            "💬 <b>Connect Forum Supergroup for Dedicated User Logs</b>\n\n"
+            "Forward any message from your Forum Supergroup (with Topics enabled), or send its <code>-100...</code> Chat ID:\n\n"
+            "<b>Requirements:</b>\n"
+            "1. Group must have <b>Forum Topics</b> enabled.\n"
+            "2. Bot must be an <b>Administrator</b> with <b>Manage Topics</b> and <b>Post Messages</b> permissions.\n\n"
+            "<i>Every bot user will get an individual dedicated topic created automatically!</i>",
             reply_markup=cancel_kb,
             parse_mode="HTML"
         )
@@ -354,7 +345,6 @@ async def admin_panel_action_callback(callback: CallbackQuery, db: DatabaseSessi
 # --- Dynamic Logs Group & Topic Configuration ---
 
 @router.message(Command("cancel"), AdminLogState.waiting_for_chat)
-@router.message(Command("cancel"), AdminLogState.waiting_for_thread)
 async def admin_cancel_log_setup(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
     """Cancels ongoing log setup and returns to logs dashboard."""
     await state.clear()
@@ -363,7 +353,7 @@ async def admin_cancel_log_setup(message: Message, state: FSMContext, db: Databa
 
 @router.message(AdminLogState.waiting_for_chat)
 async def admin_log_chat_input(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
-    """Receives target chat ID or forwarded message for logging."""
+    """Receives target forum supergroup ID or forwarded message for logging."""
     target_chat = None
 
     if message.forward_from_chat:
@@ -387,7 +377,7 @@ async def admin_log_chat_input(message: Message, state: FSMContext, db: Database
         await message.reply("⚠️ Could not detect chat. Please send a valid Chat ID (e.g. <code>-1001234567890</code>) or <code>@username</code>:", parse_mode="HTML")
         return
 
-    status_msg = await message.reply("⏳ <i>Verifying connectivity and bot admin permissions...</i>", parse_mode="HTML")
+    status_msg = await message.reply("⏳ <i>Verifying Forum Supergroup connectivity & admin permissions...</i>", parse_mode="HTML")
     ok, detail, chat_type = await tg_logger.test_connection(target_chat)
 
     if not ok:
@@ -395,8 +385,9 @@ async def admin_log_chat_input(message: Message, state: FSMContext, db: Database
             f"❌ <b>Connection Test Failed for <code>{target_chat}</code></b>\n\n"
             f"• <b>Error:</b> <code>{detail}</code>\n\n"
             "<b>Troubleshooting:</b>\n"
-            "1. Did you add the bot to that channel/group?\n"
-            "2. Did you promote the bot to <b>Administrator</b> with 'Post Messages' permissions?\n\n"
+            "1. Did you add the bot to that Forum Supergroup?\n"
+            "2. Is <b>Topics / Forum mode</b> enabled in group settings?\n"
+            "3. Did you promote the bot to <b>Administrator</b> with <b>Manage Topics</b> and <b>Post Messages</b> permissions?\n\n"
             "<i>Send another ID to retry, or send <code>/cancel</code> to abort.</i>",
             parse_mode="HTML"
         )
@@ -404,78 +395,30 @@ async def admin_log_chat_input(message: Message, state: FSMContext, db: Database
 
     await db.set_setting("log_chat_id", str(target_chat))
     await db.set_setting("log_enabled", "true")
-
-    data = await state.get_data()
-    mode = data.get("mode", "normal")
-
-    if mode == "topic":
-        await db.set_setting("log_chat_type", "topic_group")
-        await state.set_state(AdminLogState.waiting_for_thread)
-        await status_msg.edit_text(
-            f"✅ <b>Connected to Forum Supergroup!</b>\n\n"
-            f"• <b>Chat:</b> <code>{target_chat}</code> ({chat_type})\n\n"
-            "👉 Now, enter the <b>Topic ID</b> (thread ID) where logs should go (e.g. <code>2</code>, <code>145</code>), "
-            "or send <code>0</code> / <code>general</code> to log in General:",
-            parse_mode="HTML"
-        )
-    else:
-        await db.set_setting("log_chat_type", "channel_or_group")
-        await state.clear()
-        text, kb = await build_logs_panel_markup(db, tg_logger)
-        await status_msg.edit_text(
-            f"🎉 <b>Logging Destination Connected!</b>\n\n"
-            f"• <b>Destination:</b> <code>{target_chat}</code>\n"
-            f"• <b>Type:</b> <code>{chat_type}</code>\n"
-            f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
-            "<i>A verification message was delivered to the chat.</i>",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-
-@router.message(AdminLogState.waiting_for_thread)
-async def admin_log_thread_input(message: Message, state: FSMContext, db: DatabaseSession, tg_logger: TelegramLogService):
-    """Receives target topic thread ID for forum supergroups."""
-    raw = message.text.strip().lower()
-    cfg = await tg_logger.get_effective_config()
-
-    if raw in ("0", "off", "none", "general"):
-        await db.set_setting("log_thread_id", "")
-        await db.set_setting("log_chat_type", "channel_or_group")
-        await state.clear()
-        text, kb = await build_logs_panel_markup(db, tg_logger)
-        await message.reply(
-            "✅ <b>Default topic cleared!</b>\nLogs will now be delivered to the main/general chat.",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-        return
-
-    if not raw.isdigit():
-        await message.reply("⚠️ Please enter a numeric Topic ID (e.g. <code>2</code>) or send <code>0</code> for General:", parse_mode="HTML")
-        return
-
-    thread_id = int(raw)
-    status_msg = await message.reply(f"⏳ <i>Testing delivery to Topic #{thread_id}...</i>", parse_mode="HTML")
-    ok, detail, _ = await tg_logger.test_connection(cfg["chat_id"], thread_id=thread_id)
-
-    if not ok:
-        await status_msg.edit_text(
-            f"❌ <b>Failed to post in Topic #{thread_id}</b>\n\n"
-            f"• <b>Error:</b> <code>{detail}</code>\n\n"
-            "<i>Verify that this topic exists and the bot has permission to post in it, or send another ID.</i>",
-            parse_mode="HTML"
-        )
-        return
-
-    await db.set_setting("log_thread_id", str(thread_id))
+    await db.set_setting("log_user_topics", "true")
     await db.set_setting("log_chat_type", "topic_group")
+
+    await status_msg.edit_text(
+        f"✅ <b>Connected to Forum Supergroup!</b>\n\n"
+        f"• <b>Chat:</b> <code>{target_chat}</code> ({chat_type})\n"
+        "⏳ <i>Now auto-creating / syncing dedicated topics for all database users...</i>",
+        parse_mode="HTML"
+    )
+
+    created, existing, failed = await tg_logger.sync_all_user_topics(db)
     await state.clear()
     text, kb = await build_logs_panel_markup(db, tg_logger)
+
     await status_msg.edit_text(
-        f"🎉 <b>Forum Topic Configured Successfully!</b>\n\n"
-        f"• <b>Supergroup:</b> <code>{cfg['chat_id']}</code>\n"
-        f"• <b>Topic ID:</b> <code>#{thread_id}</code>\n"
-        f"• <b>Status:</b> 🟢 <b>Active</b>",
+        f"🎉 <b>Forum Topic Logging Configured!</b>\n\n"
+        f"• <b>Destination:</b> <code>{target_chat}</code>\n"
+        f"• <b>Mode:</b> 🧵 1 Dedicated Topic Per User\n"
+        f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
+        f"<b>Initial Topic Sync:</b>\n"
+        f"• 🆕 <b>Created:</b> <code>{created}</code>\n"
+        f"• ℹ️ <b>Existing:</b> <code>{existing}</code>\n"
+        f"• ⚠️ <b>Failed:</b> <code>{failed}</code>\n\n"
+        "<i>New users will also automatically have their topic created whenever they interact with the bot!</i>",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -492,7 +435,7 @@ async def admin_logs_menu_cmd(message: Message, db: DatabaseSession, tg_logger: 
 async def admin_logson_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
     """Turns logs ON dynamically."""
     await db.set_setting("log_enabled", "true")
-    cfg = await tg_logger.get_effective_config()
+    cfg = await tg_logger.get_effective_config(db=db)
     dest = f"<code>{cfg['chat_id']}</code>" if cfg['chat_id'] else "<i>(Not Set yet - use /setlogs)</i>"
     await message.reply(f"🟢 <b>Telegram Logging Activated</b>\nDestination: {dest}", parse_mode="HTML")
 
@@ -505,22 +448,18 @@ async def admin_logsoff_cmd(message: Message, db: DatabaseSession):
 @router.message(Command("setlogs", "set_logs"))
 async def admin_setlogs_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
     """
-    Directly set logs destination with optional topic ID.
+    Directly set logs forum supergroup and auto-sync user topics.
     Usage:
-      /setlogs <chat_id_or_username> [topic_id]
-    Examples:
+      /setlogs <supergroup_chat_id>
+    Example:
       /setlogs -1001234567890
-      /setlogs -1001234567890 4
-      /setlogs @my_channel
     """
     args = message.text.split()[1:]
     if not args:
         await message.reply(
-            "⚠️ <b>Usage:</b> <code>/setlogs &lt;chat_id_or_username&gt; [topic_id]</code>\n\n"
-            "<b>Examples:</b>\n"
-            "• Normal channel/group: <code>/setlogs -1001234567890</code>\n"
-            "• With specific Topic ID: <code>/setlogs -1001234567890 4</code>\n"
-            "• Public channel: <code>/setlogs @my_alerts</code>",
+            "⚠️ <b>Usage:</b> <code>/setlogs &lt;supergroup_chat_id&gt;</code>\n\n"
+            "<b>Example:</b> <code>/setlogs -1001234567890</code>\n\n"
+            "<i>(Group must have Forum Topics enabled and bot must be Administrator with Manage Topics)</i>",
             parse_mode="HTML"
         )
         return
@@ -531,86 +470,69 @@ async def admin_setlogs_cmd(message: Message, db: DatabaseSession, tg_logger: Te
     except ValueError:
         target_chat = raw_chat if raw_chat.startswith("@") else f"@{raw_chat}"
 
-    thread_id = None
-    if len(args) > 1 and args[1].isdigit():
-        thread_id = int(args[1])
-
     status_msg = await message.reply("⏳ <i>Testing connection and permissions...</i>", parse_mode="HTML")
-    ok, detail, chat_type = await tg_logger.test_connection(target_chat, thread_id)
+    ok, detail, chat_type = await tg_logger.test_connection(target_chat)
 
     if not ok:
         await status_msg.edit_text(
             f"❌ <b>Could not connect to {target_chat}</b>\n\n"
             f"• <b>Error:</b> <code>{detail}</code>\n\n"
-            "<i>Make sure the bot has been added as Administrator in the target chat with post permissions.</i>",
+            "<i>Make sure the bot has been added as Administrator in the forum supergroup with 'Manage Topics' and 'Post Messages' permissions.</i>",
             parse_mode="HTML"
         )
         return
 
     await db.set_setting("log_chat_id", str(target_chat))
     await db.set_setting("log_enabled", "true")
-    if thread_id:
-        await db.set_setting("log_thread_id", str(thread_id))
-        await db.set_setting("log_chat_type", "topic_group")
-    else:
-        await db.set_setting("log_chat_type", "channel_or_group")
+    await db.set_setting("log_user_topics", "true")
+    await db.set_setting("log_chat_type", "topic_group")
 
-    topic_info = f"\n• <b>Topic ID:</b> <code>#{thread_id}</code>" if thread_id else ""
     await status_msg.edit_text(
-        f"✅ <b>Logging Destination Successfully Configured!</b>\n\n"
+        f"✅ <b>Supergroup Connected!</b>\n\n"
         f"• <b>Destination:</b> <code>{target_chat}</code>\n"
-        f"• <b>Chat Type:</b> <code>{chat_type}</code>{topic_info}\n"
-        f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
-        "<i>All system events and error reports will now be delivered here.</i>",
+        "⏳ <i>Auto-syncing dedicated topics for all users...</i>",
         parse_mode="HTML"
     )
 
-@router.message(Command("setlogtopic", "set_log_topic"))
-async def admin_setlogtopic_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
+    created, existing, failed = await tg_logger.sync_all_user_topics(db)
+    await status_msg.edit_text(
+        f"🎉 <b>Forum Topic Logging Configured!</b>\n\n"
+        f"• <b>Destination:</b> <code>{target_chat}</code>\n"
+        f"• <b>Mode:</b> 🧵 1 Dedicated Topic Per User\n"
+        f"• <b>Status:</b> 🟢 <b>Active</b>\n\n"
+        f"<b>Topic Sync:</b>\n"
+        f"• 🆕 <b>Created:</b> <code>{created}</code>\n"
+        f"• ℹ️ <b>Existing:</b> <code>{existing}</code>\n"
+        f"• ⚠️ <b>Failed:</b> <code>{failed}</code>",
+        parse_mode="HTML"
+    )
+
+@router.message(Command("synctopics", "sync_topics"))
+async def admin_sync_topics_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
     """
-    Sets or clears the default topic/thread ID.
-    Usage: /setlogtopic <topic_id|off>
+    Sync and create missing topics in the logs supergroup for all database users.
+    Usage: /synctopics
     """
-    args = message.text.split()[1:]
-    if not args:
-        await message.reply(
-            "⚠️ <b>Usage:</b> <code>/setlogtopic &lt;topic_id|off&gt;</code>\n"
-            "Example: <code>/setlogtopic 4</code> (or <code>/setlogtopic off</code>)",
-            parse_mode="HTML"
-        )
-        return
-
-    raw = args[0].strip().lower()
-    if raw in ("off", "0", "none", "clear"):
-        await db.set_setting("log_thread_id", "")
-        await db.set_setting("log_chat_type", "channel_or_group")
-        await message.reply("✅ <b>Topic routing disabled.</b> Logs will be sent to the main chat.", parse_mode="HTML")
-        return
-
-    if not raw.isdigit():
-        await message.reply("⚠️ Topic ID must be numeric (e.g. <code>4</code>) or <code>off</code>.", parse_mode="HTML")
-        return
-
-    thread_id = int(raw)
-    cfg = await tg_logger.get_effective_config()
+    cfg = await tg_logger.get_effective_config(db=db)
     if not cfg["chat_id"]:
-        await message.reply("⚠️ Please configure the log supergroup first via <code>/setlogs &lt;chat_id&gt;</code>.", parse_mode="HTML")
+        await message.reply("⚠️ Please configure the log supergroup first via <code>/setlogs &lt;chat_id&gt;</code> or in <code>/logs</code>.", parse_mode="HTML")
         return
 
-    status_msg = await message.reply(f"⏳ <i>Testing Topic #{thread_id}...</i>", parse_mode="HTML")
-    ok, detail, _ = await tg_logger.test_connection(cfg["chat_id"], thread_id)
-    if not ok:
-        await status_msg.edit_text(f"❌ <b>Error posting to Topic #{thread_id}:</b> <code>{detail}</code>", parse_mode="HTML")
-        return
-
-    await db.set_setting("log_thread_id", str(thread_id))
-    await db.set_setting("log_chat_type", "topic_group")
-    await status_msg.edit_text(f"✅ <b>Default log topic updated to #{thread_id}!</b>", parse_mode="HTML")
+    status_msg = await message.reply("⏳ <i>Syncing topics for all database users...</i>", parse_mode="HTML")
+    created, existing, failed = await tg_logger.sync_all_user_topics(db)
+    await status_msg.edit_text(
+        f"🔄 <b>User Topics Synchronization Completed!</b>\n\n"
+        f"• 🆕 <b>New Topics Created:</b> <code>{created}</code>\n"
+        f"• ℹ️ <b>Already Had Topics:</b> <code>{existing}</code>\n"
+        f"• ⚠️ <b>Failed / Skipped:</b> <code>{failed}</code>\n\n"
+        "<i>All active bot users now have their dedicated forum log topic!</i>",
+        parse_mode="HTML"
+    )
 
 @router.message(Command("testlog", "test_log"))
-async def admin_test_log_cmd(message: Message, tg_logger: TelegramLogService):
+async def admin_test_log_cmd(message: Message, db: DatabaseSession, tg_logger: TelegramLogService):
     """Sends a verification test log to the currently active destination."""
-    cfg = await tg_logger.get_effective_config()
+    cfg = await tg_logger.get_effective_config(db=db)
     if not cfg["chat_id"]:
         await message.reply("⚠️ No log destination configured! Use <code>/setlogs &lt;chat_id&gt;</code> first.", parse_mode="HTML")
         return

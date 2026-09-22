@@ -6,4 +6,3 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AdminLogState(StatesGroup):
     waiting_for_chat = State()
-    waiting_for_thread = State()

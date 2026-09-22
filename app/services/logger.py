@@ -2,6 +2,7 @@
 # Author: bipinone (https://github.com/bipinone)
 # Repository: https://github.com/bipinone/tg-bot-boilerplate
 
+import asyncio
 import logging
 import datetime
 from typing import Optional, List, Union, Dict, Any, Tuple
@@ -153,15 +154,19 @@ class TelegramLogService:
         db
     ) -> Optional[int]:
         """
-        Creates a dedicated forum topic for each new user in the supergroup,
+        Creates a dedicated forum topic for each user in the supergroup,
         or returns existing topic_id from database.
         """
-        cfg = await self.get_effective_config(db=db)
+        target_db = db or self.db
+        if not target_db:
+            return None
+
+        cfg = await self.get_effective_config(db=target_db)
         if not cfg["enabled"] or not cfg["chat_id"] or not cfg["user_topics"]:
             return None
 
         # Check existing topic in db
-        existing_topic = await db.get_user_topic(user_id)
+        existing_topic = await target_db.get_user_topic(user_id)
         if existing_topic:
             return existing_topic
 
@@ -172,12 +177,84 @@ class TelegramLogService:
                 name=topic_name
             )
             thread_id = topic.message_thread_id
-            await db.set_user_topic(user_id, thread_id)
+            await target_db.set_user_topic(user_id, thread_id)
             logger.info("Created dedicated forum topic #%s for user %s (%s)", thread_id, user_id, first_name)
+
+            # Post welcome profile card inside the new topic
+            try:
+                card = (
+                    f"👤 <b>User Topic Initialized</b>\n\n"
+                    f"• <b>Name:</b> {first_name}\n"
+                    f"• <b>Username:</b> @{username if username else 'None'}\n"
+                    f"• <b>User ID:</b> <code>{user_id}</code>\n\n"
+                    f"<i>All activities, private messages & support chat from this user will be logged in this dedicated topic!</i>"
+                )
+                await self.bot.send_message(
+                    chat_id=cfg["chat_id"],
+                    message_thread_id=thread_id,
+                    text=card,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
             return thread_id
         except Exception as e:
             logger.warning("Could not auto-create forum topic for user %s: %s", user_id, e)
             return None
+
+    async def ensure_user_topic(
+        self,
+        user_id: int,
+        first_name: str,
+        username: Optional[str] = None,
+        db = None
+    ) -> Optional[int]:
+        """
+        Ensures a dedicated forum topic exists for this user.
+        If it does not exist, automatically creates it.
+        """
+        return await self.get_or_create_user_topic(user_id, first_name, username, db=db)
+
+    async def sync_all_user_topics(self, db) -> Tuple[int, int, int]:
+        """
+        Iterates all users in the database and creates missing forum topics
+        for every user in the logs supergroup.
+        Returns: (created_count, already_existing_count, failed_count)
+        """
+        target_db = db or self.db
+        if not target_db:
+            return 0, 0, 0
+
+        cfg = await self.get_effective_config(db=target_db)
+        if not cfg["enabled"] or not cfg["chat_id"]:
+            return 0, 0, 0
+
+        users = await target_db.get_all_users()
+        created = 0
+        existing = 0
+        failed = 0
+
+        for u in users:
+            uid = u["user_id"]
+            first_name = u.get("first_name", "User")
+            username = u.get("username")
+
+            topic_id = await target_db.get_user_topic(uid)
+            if topic_id:
+                existing += 1
+                continue
+
+            new_topic = await self.get_or_create_user_topic(uid, first_name, username, db=target_db)
+            if new_topic:
+                created += 1
+            else:
+                failed += 1
+
+            # Prevent Telegram flood limit
+            await asyncio.sleep(0.25)
+
+        return created, existing, failed
 
     async def log_startup(self, bot_username: str, active_modules: List[str]):
         """Notifies log chat when the bot initializes."""
