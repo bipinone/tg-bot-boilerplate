@@ -318,9 +318,37 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         mongo_ad2 = create_database_adapter(db_type="mongo")
         self.assertIsInstance(mongo_ad2, MongoAdapter)
 
+    def test_broadcast_engine_helpers(self):
+        from app.modules.broadcast.router import render_progress_bar, broadcast_state, get_broadcast_controls_markup
+
+        # 1. Progress Bar
+        bar_0 = render_progress_bar(0, 100, length=10)
+        self.assertIn("0.0%", bar_0)
+
+        bar_50 = render_progress_bar(50, 100, length=10)
+        self.assertIn("50.0%", bar_50)
+        self.assertIn("█████", bar_50)
+
+        bar_100 = render_progress_bar(100, 100, length=10)
+        self.assertIn("100.0%", bar_100)
+        self.assertIn("██████████", bar_100)
+
+        # 2. Control Markup
+        kb_running = get_broadcast_controls_markup(is_paused=False)
+        self.assertEqual(kb_running.inline_keyboard[0][0].text, "⏸️ Pause")
+
+        kb_paused = get_broadcast_controls_markup(is_paused=True)
+        self.assertEqual(kb_paused.inline_keyboard[0][0].text, "▶️ Resume")
+
+        # 3. State verification
+        self.assertIn("running", broadcast_state)
+        self.assertIn("paused", broadcast_state)
+        self.assertIn("cancelled", broadcast_state)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

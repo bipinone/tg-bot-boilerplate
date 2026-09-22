@@ -189,7 +189,10 @@ docker compose logs -f telecore-bot
 | `/ask <query>` | AI | Public | Queries the integrated AI assistant module. |
 | `/panel` | Admin | Admin Only | Opens the interactive real-time control dashboard with inline toggles. |
 | `/stats` | Admin | Admin Only | Returns total registered users, active counts, and event metrics. |
-| `/broadcast <msg>` | Broadcast | Admin Only | Sends mass notification to all users with flood throttling. |
+| `/broadcast [flags]` | Broadcast | Admin Only | High-speed mass announcement (`-copy`, `-pin`, `-silent`, `-fast`). |
+| `/broadcast_pause` | Broadcast | Admin Only | Pauses an active mass broadcast in real time. |
+| `/broadcast_resume` | Broadcast | Admin Only | Resumes a paused mass broadcast. |
+| `/broadcast_cancel` | Broadcast | Admin Only | Terminates active broadcast and cancels pending tasks. |
 | `/ban <user_id> [reason]` | Admin | Admin Only | Revokes bot access with reason, notifying the target user. |
 | `/unban <user_id>` | Admin | Admin Only | Restores bot access for a previously banned user. |
 | `/user <user_id>` | Admin | Admin Only | Inspects user profile, RBAC role, points, and ban history. |
@@ -199,6 +202,7 @@ docker compose logs -f telecore-bot
 | `/set_channel_url <url>` | Admin | Admin Only | Updates the custom invite link for Force-Subscription. |
 | `/maintenance <on\|off>` | Admin | Admin Only | Toggles maintenance mode (allows staff access while pausing public users). |
 | `/export` | Admin | Admin Only | Exports all registered users into a downloadable CSV spreadsheet. |
+
 
 
 ---
