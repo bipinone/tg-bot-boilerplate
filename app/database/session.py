@@ -1,3 +1,7 @@
+# TeleCore Telegram Bot Framework - Unified Database Session Engine
+# Author: bipinone (https://github.com/bipinone)
+# Repository: https://github.com/bipinone/tg-bot-boilerplate
+
 import logging
 from typing import Optional, Dict, Any, List, Union
 

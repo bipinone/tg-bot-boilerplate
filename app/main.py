@@ -1,3 +1,7 @@
+# TeleCore Telegram Bot Framework
+# Author: bipinone (https://github.com/bipinone)
+# Repository: https://github.com/bipinone/tg-bot-boilerplate
+
 import asyncio
 import logging
 import sys
@@ -29,11 +33,13 @@ from app.modules.i18n.router import router as i18n_router
 from app.modules.groups.router import router as groups_router
 from app.modules.subscriptions.router import router as subscriptions_router
 from app.modules.scheduler.service import TaskScheduler
+from app.bot.setup_commands import setup_bot_metadata
 
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
     level=getattr(logging, config.log_level.upper(), logging.INFO)
 )
+
 logger = logging.getLogger("TeleCore")
 
 def get_active_module_names() -> list:
@@ -124,6 +130,9 @@ async def run_polling(bot: Bot, dp: Dispatcher, db: DatabaseSession, tg_logger: 
     bot_info = await bot.get_me()
     logger.info("Starting TeleCore bot @%s in POLLING mode...", bot_info.username)
 
+    # Register default BotCommand menu, descriptions, and bipinone credits
+    await setup_bot_metadata(bot)
+
     # Send startup alert to log channel/topic
     await tg_logger.log_startup(bot_info.username, get_active_module_names())
 
@@ -140,6 +149,9 @@ async def run_webhook(bot: Bot, dp: Dispatcher, db: DatabaseSession, tg_logger: 
     webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_handler.register(app, path=config.webhook.path)
     setup_application(app, dp, bot=bot)
+
+    # Register default BotCommand menu, descriptions, and bipinone credits
+    await setup_bot_metadata(bot)
 
     await bot.set_webhook(url=config.webhook.url, drop_pending_updates=config.bot.drop_pending_updates)
     logger.info("Starting TeleCore bot @%s in WEBHOOK mode on %s:%s%s", bot_info.username, config.webhook.host, config.webhook.port, config.webhook.path)

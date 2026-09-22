@@ -434,6 +434,29 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
             if module_path.exists():
                 shutil.rmtree(module_path)
 
+    async def test_setup_bot_metadata(self):
+        from unittest.mock import AsyncMock
+        from app.bot.setup_commands import setup_bot_metadata
+
+        mock_bot = AsyncMock()
+        mock_bot.set_my_commands = AsyncMock()
+        mock_bot.set_my_description = AsyncMock()
+        mock_bot.set_my_short_description = AsyncMock()
+
+        await setup_bot_metadata(mock_bot)
+
+        self.assertTrue(mock_bot.set_my_commands.called)
+        self.assertTrue(mock_bot.set_my_description.called)
+        self.assertTrue(mock_bot.set_my_short_description.called)
+
+        # Verify bipinone credit in description
+        desc_args = mock_bot.set_my_description.call_args[1]
+        self.assertIn("bipinone", desc_args["description"].lower())
+
+        # Verify bipinone credit in short description
+        short_desc_args = mock_bot.set_my_short_description.call_args[1]
+        self.assertIn("bipinone", short_desc_args["short_description"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

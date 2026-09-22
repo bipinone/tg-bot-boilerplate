@@ -1,3 +1,7 @@
+# TeleCore Telegram Bot Framework - Configuration Engine
+# Author: bipinone (https://github.com/bipinone)
+# Repository: https://github.com/bipinone/tg-bot-boilerplate
+
 import os
 from dataclasses import dataclass, field
 from typing import List, Optional

@@ -1,3 +1,7 @@
+# TeleCore Telegram Bot Framework - CLI Scaffolding Tool
+# Author: bipinone (https://github.com/bipinone)
+# Repository: https://github.com/bipinone/tg-bot-boilerplate
+
 import sys
 import os
 import re
