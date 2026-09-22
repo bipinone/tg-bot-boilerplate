@@ -1,0 +1,9 @@
+services:
+  telecore-bot:
+    build: .
+    container_name: telecore-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
