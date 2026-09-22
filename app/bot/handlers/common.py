@@ -22,7 +22,7 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     ])
 
 @router.message(CommandStart())
-async def start_handler(message: Message, db: DatabaseSession):
+async def start_handler(message: Message, db: DatabaseSession, tg_logger = None):
     """Handles /start command with deep linking support."""
     user = message.from_user
     args = message.text.split()[1:] if len(message.text.split()) > 1 else []
@@ -45,6 +45,10 @@ async def start_handler(message: Message, db: DatabaseSession):
     )
 
     await db.log_event(user.id, "start")
+
+    # Send log to group/topic if brand new user
+    if is_new and tg_logger:
+        await tg_logger.log_new_user(user.id, user.username, user.first_name, referrer_id)
 
     text = (
         f"👋 <b>Welcome, {user.first_name}!</b>\n\n"

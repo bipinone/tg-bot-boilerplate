@@ -56,6 +56,18 @@ class ModuleFlags:
     miniapp: bool = field(default_factory=lambda: _parse_bool(os.getenv("ENABLE_MODULE_MINIAPP", "false")))
     analytics: bool = field(default_factory=lambda: _parse_bool(os.getenv("ENABLE_MODULE_ANALYTICS", "true"), True))
 
+def _parse_optional_int(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    clean = value.strip()
+    return int(clean) if clean.lstrip("-").isdigit() else None
+
+@dataclass
+class LoggingConfig:
+    chat_id: Optional[int] = field(default_factory=lambda: _parse_optional_int(os.getenv("LOG_CHAT_ID", "")))
+    thread_id: Optional[int] = field(default_factory=lambda: _parse_optional_int(os.getenv("LOG_THREAD_ID", "")))
+    level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+
 @dataclass
 class AppConfig:
     bot: BotConfig = field(default_factory=BotConfig)
@@ -63,6 +75,7 @@ class AppConfig:
     redis: RedisConfig = field(default_factory=RedisConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     modules: ModuleFlags = field(default_factory=ModuleFlags)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
 
 config = AppConfig()

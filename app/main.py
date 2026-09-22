@@ -4,10 +4,12 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import ErrorEvent
 from aiohttp import web
 
 from app.config import config
 from app.database.session import DatabaseSession
+from app.services.logger import TelegramLogService
 from app.bot.middlewares.rate_limit import RateLimitMiddleware
 from app.bot.handlers.common import router as common_router
 
@@ -26,12 +28,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TeleCore")
 
-def create_dispatcher(db: DatabaseSession) -> Dispatcher:
-    """Builds and wires up the aiogram 3 Dispatcher with active modules."""
+def get_active_module_names() -> list:
+    """Returns list of currently active feature flags."""
+    active = []
+    if config.modules.admin: active.append("Admin")
+    if config.modules.broadcast: active.append("Broadcast")
+    if config.modules.force_sub: active.append("ForceSub")
+    if config.modules.referrals: active.append("Referrals")
+    if config.modules.ai: active.append("AI")
+    if config.modules.miniapp: active.append("MiniApp")
+    if config.modules.payments: active.append("Payments")
+    if config.modules.analytics: active.append("Analytics")
+    return active
+
+def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dispatcher:
+    """Builds and wires up the aiogram 3 Dispatcher with active modules and logging."""
     dp = Dispatcher()
 
-    # Inject shared database session
+    # Inject shared database session and Telegram logger into context
     dp["db"] = db
+    dp["tg_logger"] = tg_logger
 
     # Global Rate Limiting
     dp.message.middleware(RateLimitMiddleware(limit_seconds=config.bot.rate_limit))
@@ -69,18 +85,32 @@ def create_dispatcher(db: DatabaseSession) -> Dispatcher:
         logger.info("Module ENABLED: Telegram Stars & Payments")
         dp.include_router(payments_router)
 
+    # Global Error Handler
+    @dp.error()
+    async def global_error_handler(event: ErrorEvent):
+        logger.exception("Unhandled exception occurred: %s", event.exception)
+        user_id = event.update.effective_user.id if event.update and event.update.effective_user else None
+        cmd = event.update.message.text if event.update and event.update.message else None
+        await tg_logger.log_error(str(event.exception), user_id=user_id, command=cmd)
+
     return dp
 
-async def run_polling(bot: Bot, dp: Dispatcher, db: DatabaseSession):
+async def run_polling(bot: Bot, dp: Dispatcher, db: DatabaseSession, tg_logger: TelegramLogService):
     """Starts polling loop."""
     await db.init_models()
-    logger.info("Starting TeleCore bot in POLLING mode...")
+    bot_info = await bot.get_me()
+    logger.info("Starting TeleCore bot @%s in POLLING mode...", bot_info.username)
+
+    # Send startup alert to log channel/topic
+    await tg_logger.log_startup(bot_info.username, get_active_module_names())
+
     await bot.delete_webhook(drop_pending_updates=config.bot.drop_pending_updates)
     await dp.start_polling(bot)
 
-async def run_webhook(bot: Bot, dp: Dispatcher, db: DatabaseSession):
+async def run_webhook(bot: Bot, dp: Dispatcher, db: DatabaseSession, tg_logger: TelegramLogService):
     """Starts aiohttp server for Webhook mode."""
     await db.init_models()
+    bot_info = await bot.get_me()
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
     app = web.Application()
@@ -89,7 +119,10 @@ async def run_webhook(bot: Bot, dp: Dispatcher, db: DatabaseSession):
     setup_application(app, dp, bot=bot)
 
     await bot.set_webhook(url=config.webhook.url, drop_pending_updates=config.bot.drop_pending_updates)
-    logger.info("Starting TeleCore bot in WEBHOOK mode on %s:%s%s", config.webhook.host, config.webhook.port, config.webhook.path)
+    logger.info("Starting TeleCore bot @%s in WEBHOOK mode on %s:%s%s", bot_info.username, config.webhook.host, config.webhook.port, config.webhook.path)
+
+    # Send startup alert to log channel/topic
+    await tg_logger.log_startup(bot_info.username, get_active_module_names())
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -108,13 +141,14 @@ async def main():
     )
 
     db = DatabaseSession(config.db.sqlite_path)
-    dp = create_dispatcher(db)
+    tg_logger = TelegramLogService(bot)
+    dp = create_dispatcher(db, tg_logger)
 
     try:
         if config.webhook.enabled:
-            await run_webhook(bot, dp, db)
+            await run_webhook(bot, dp, db, tg_logger)
         else:
-            await run_polling(bot, dp, db)
+            await run_polling(bot, dp, db, tg_logger)
     finally:
         await bot.session.close()
 

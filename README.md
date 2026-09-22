@@ -37,6 +37,7 @@ Most Telegram bot starters provide only a basic `/start` handler, forcing develo
 - **Feature-Flagged Modules**: Enable or disable features directly via `.env` flags without editing core application code.
 - **Async Persistence Layer**: SQLite default with automatic migrations, seamlessly upgradeable to PostgreSQL.
 - **Anti-Flood Middleware**: In-memory and Redis-compatible sliding window rate limiter to prevent API 429 penalties.
+- **Telegram Group & Forum Topic Logging**: Real-time alerts for bot startups, new user registrations, and unhandled errors routed to standard channels or specific Supergroup Forum Topics (`message_thread_id`).
 - **Docker Compose Stack**: Containerized deployment with optional Redis caching service.
 
 ---

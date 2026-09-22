@@ -68,5 +68,36 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         active_users = await self.db.get_all_active_user_ids()
         self.assertNotIn(3003, active_users)
 
+    async def test_telegram_log_service(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.services.logger import TelegramLogService
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(return_value=True)
+
+        logger_service = TelegramLogService(mock_bot)
+        logger_service.chat_id = -1001234567890
+        logger_service.default_thread_id = 42
+
+        # 1. Test log send with default topic thread_id
+        await logger_service.send_log("Test log")
+        mock_bot.send_message.assert_called_with(
+            chat_id=-1001234567890,
+            text="Test log",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            message_thread_id=42
+        )
+
+        # 2. Test log send without thread_id (normal group/channel)
+        logger_service.default_thread_id = None
+        await logger_service.send_log("Normal group log")
+        mock_bot.send_message.assert_called_with(
+            chat_id=-1001234567890,
+            text="Normal group log",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+
 if __name__ == "__main__":
     unittest.main()
