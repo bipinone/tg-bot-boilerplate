@@ -58,6 +58,11 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["active_users"], 2)
         self.assertEqual(stats["total_events"], 1)
 
+        # 6. Test get_all_users for CSV export
+        all_users = await self.db.get_all_users()
+        self.assertEqual(len(all_users), 2)
+        self.assertEqual(all_users[0]["user_id"], 2002)
+
     async def test_ban_and_active_user_list(self):
         await self.db.upsert_user(user_id=3003, username="spammer", first_name="Spam")
         await self.db.set_ban(user_id=3003, is_banned=True)
@@ -117,6 +122,11 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         cached_thread = await logger_service.get_or_create_user_topic(7777, "Alex", "newuser", self.db)
         self.assertEqual(cached_thread, 999)
         mock_bot.create_forum_topic.assert_not_called()
+
+    async def test_health_server(self):
+        from app.services.health import HealthServer
+        server = HealthServer(self.db)
+        self.assertIsNotNone(server.app)
 
 if __name__ == "__main__":
     unittest.main()

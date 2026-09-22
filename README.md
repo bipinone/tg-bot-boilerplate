@@ -54,6 +54,8 @@ TeleCore features an isolated, modular architecture where features can be toggle
 | **Referrals** | `ENABLE_MODULE_REFERRALS=true` | Deep-link invitation engine (`/start ref_123`), referral counters, and reward points. |
 | **Telegram Mini Apps** | `ENABLE_MODULE_MINIAPP=true` | Native WebApp integration buttons and handlers. |
 | **AI Assistant** | `ENABLE_MODULE_AI=true` | Pluggable streaming endpoint for OpenAI and Google Gemini LLM queries. |
+| **Live Support Chat** | `ENABLE_TOPIC_SUPPORT_CHAT=true` | Two-way relay: user DMs forwarded to personal forum topics; admin replies in topic sent back to user. |
+| **Health & Metrics** | `HEALTH_SERVER_ENABLED=true` | Built-in HTTP server (`/health`, `/metrics`) on port 8080 preventing cloud sleeping on Render/Railway/VPS. |
 | **Payments** | `ENABLE_MODULE_PAYMENTS=true` | Digital goods invoices and Telegram Stars (`XTR`) checkout handlers. |
 | **Analytics** | `ENABLE_MODULE_ANALYTICS=true` | Event logging and active user telemetry. |
 
@@ -177,6 +179,7 @@ docker compose logs -f telecore-bot
 | `/broadcast <msg>` | Broadcast | Admin Only | Sends mass notification to all users with flood throttling. |
 | `/ban <user_id>` | Admin | Admin Only | Revokes bot access for the specified Telegram ID. |
 | `/unban <user_id>` | Admin | Admin Only | Restores bot access for a previously banned user. |
+| `/export` | Admin | Admin Only | Exports all registered users into a downloadable CSV spreadsheet. |
 
 ---
 

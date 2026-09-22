@@ -92,6 +92,14 @@ class DatabaseSession:
                 rows = await cursor.fetchall()
                 return [r[0] for r in rows]
 
+    async def get_all_users(self) -> List[Dict[str, Any]]:
+        """Returns all registered users for data export."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, username, first_name, last_name, language_code, referrer_id, points, is_banned, created_at FROM users ORDER BY created_at DESC") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
     async def set_ban(self, user_id: int, is_banned: bool = True) -> bool:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("UPDATE users SET is_banned = ? WHERE user_id = ?", (1 if is_banned else 0, user_id))

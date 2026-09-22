@@ -10,6 +10,7 @@ from aiohttp import web
 from app.config import config
 from app.database.session import DatabaseSession
 from app.services.logger import TelegramLogService
+from app.services.health import HealthServer
 from app.bot.middlewares.rate_limit import RateLimitMiddleware
 from app.bot.handlers.common import router as common_router
 
@@ -20,6 +21,7 @@ from app.modules.referrals.router import router as referrals_router
 from app.modules.ai.router import router as ai_router
 from app.modules.miniapp.router import router as miniapp_router
 from app.modules.payments.router import router as payments_router
+from app.modules.support.router import router as support_router
 from app.modules.force_sub.middleware import ForceSubMiddleware
 
 logging.basicConfig(
@@ -38,7 +40,8 @@ def get_active_module_names() -> list:
     if config.modules.ai: active.append("AI")
     if config.modules.miniapp: active.append("MiniApp")
     if config.modules.payments: active.append("Payments")
-    if config.modules.analytics: active.append("Analytics")
+    if config.support.enabled: active.append("LiveSupport")
+    if config.health.enabled: active.append("HealthServer")
     return active
 
 def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dispatcher:
@@ -84,6 +87,10 @@ def create_dispatcher(db: DatabaseSession, tg_logger: TelegramLogService) -> Dis
     if config.modules.payments:
         logger.info("Module ENABLED: Telegram Stars & Payments")
         dp.include_router(payments_router)
+
+    if config.support.enabled:
+        logger.info("Module ENABLED: Two-Way Topic Live Support Chat")
+        dp.include_router(support_router)
 
     # Global Error Handler
     @dp.error()
@@ -144,12 +151,17 @@ async def main():
     tg_logger = TelegramLogService(bot)
     dp = create_dispatcher(db, tg_logger)
 
+    # Start Cloud Health Server (concurrent liveness probe)
+    health_server = HealthServer(db)
+    await health_server.start()
+
     try:
         if config.webhook.enabled:
             await run_webhook(bot, dp, db, tg_logger)
         else:
             await run_polling(bot, dp, db, tg_logger)
     finally:
+        await health_server.stop()
         await bot.session.close()
 
 if __name__ == "__main__":

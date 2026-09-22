@@ -70,11 +70,23 @@ class LoggingConfig:
     level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
 
 @dataclass
+class HealthServerConfig:
+    enabled: bool = field(default_factory=lambda: _parse_bool(os.getenv("HEALTH_SERVER_ENABLED", "true"), True))
+    host: str = field(default_factory=lambda: os.getenv("HEALTH_SERVER_HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: int(os.getenv("PORT", os.getenv("HEALTH_SERVER_PORT", "8080"))))
+
+@dataclass
+class SupportChatConfig:
+    enabled: bool = field(default_factory=lambda: _parse_bool(os.getenv("ENABLE_TOPIC_SUPPORT_CHAT", "true"), True))
+
+@dataclass
 class AppConfig:
     bot: BotConfig = field(default_factory=BotConfig)
     db: DatabaseConfig = field(default_factory=DatabaseConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
+    health: HealthServerConfig = field(default_factory=HealthServerConfig)
+    support: SupportChatConfig = field(default_factory=SupportChatConfig)
     modules: ModuleFlags = field(default_factory=ModuleFlags)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
