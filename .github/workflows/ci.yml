@@ -30,5 +30,14 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run Unit Tests
+      shell: bash
       run: |
-        python -m unittest discover tests
+        python -m unittest discover tests -v 2>&1 | tee test_output.txt
+        EXIT_CODE=${PIPESTATUS[0]}
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "## ❌ Tests Failed on ${{ matrix.os }} (Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat test_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit $EXIT_CODE
+        fi
