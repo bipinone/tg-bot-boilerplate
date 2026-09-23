@@ -526,6 +526,41 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok)
         self.assertEqual(c_type, "supergroup")
 
+    async def test_forum_topic_per_user_system(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.services.logger import TelegramLogService
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(return_value=True)
+
+        # Mock topic creation
+        mock_topic = MagicMock()
+        mock_topic.message_thread_id = 999
+        mock_bot.create_forum_topic = AsyncMock(return_value=mock_topic)
+
+        logger_service = TelegramLogService(mock_bot, db=self.db)
+        await self.db.set_setting("log_chat_id", "-100111222333444")
+        await self.db.set_setting("log_enabled", "true")
+        await self.db.set_setting("log_user_topics", "true")
+
+        # 1. Ensure user topic for a new user
+        thread_id = await logger_service.ensure_user_topic(user_id=777888, first_name="TestUser", username="testuser", db=self.db)
+        self.assertEqual(thread_id, 999)
+        mock_bot.create_forum_topic.assert_called_once()
+
+        # 2. Repeated call should return existing thread_id from DB without creating new topic
+        mock_bot.create_forum_topic.reset_mock()
+        thread_id_cached = await logger_service.ensure_user_topic(user_id=777888, first_name="TestUser", username="testuser", db=self.db)
+        self.assertEqual(thread_id_cached, 999)
+        mock_bot.create_forum_topic.assert_not_called()
+
+        # 3. Sync all user topics
+        await self.db.upsert_user(user_id=12345, first_name="SyncMe", username="syncme")
+        created, existing, failed = await logger_service.sync_all_user_topics(self.db)
+        self.assertGreaterEqual(created, 1)
+        self.assertGreaterEqual(existing, 1)
+        self.assertEqual(failed, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

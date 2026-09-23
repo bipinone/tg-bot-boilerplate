@@ -177,6 +177,7 @@ class TelegramLogService:
                 name=topic_name
             )
             thread_id = topic.message_thread_id
+            await target_db.upsert_user(user_id=user_id, first_name=first_name, username=username)
             await target_db.set_user_topic(user_id, thread_id)
             logger.info("Created dedicated forum topic #%s for user %s (%s)", thread_id, user_id, first_name)
 
