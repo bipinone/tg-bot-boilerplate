@@ -422,13 +422,17 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(scheduler._running)
 
     def test_cli_make_module(self):
+        import io
         import shutil
+        import sys
         from pathlib import Path
         from app.cli import make_module
 
         test_module_name = "test_temp_mod"
         module_path = Path("app/modules") / test_module_name
 
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
         try:
             make_module(test_module_name)
             self.assertTrue(module_path.exists())
@@ -439,6 +443,7 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((module_path / "schemas.py").exists())
             self.assertTrue((module_path / "config.py").exists())
         finally:
+            sys.stdout = old_stdout
             if module_path.exists():
                 shutil.rmtree(module_path, ignore_errors=True)
 
