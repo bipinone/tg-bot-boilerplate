@@ -14,8 +14,15 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
         await self.db.init_models()
 
     async def asyncTearDown(self):
+        try:
+            await self.db.close()
+        except Exception:
+            pass
         if os.path.exists(self.temp_file.name):
-            os.unlink(self.temp_file.name)
+            try:
+                os.unlink(self.temp_file.name)
+            except (OSError, PermissionError):
+                pass
 
     def test_config_parsers(self):
         self.assertTrue(_parse_bool("true"))
@@ -433,7 +440,7 @@ class TestTeleCoreFramework(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((module_path / "config.py").exists())
         finally:
             if module_path.exists():
-                shutil.rmtree(module_path)
+                shutil.rmtree(module_path, ignore_errors=True)
 
     async def test_setup_bot_metadata(self):
         from unittest.mock import AsyncMock
